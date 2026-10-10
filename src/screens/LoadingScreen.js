@@ -4,14 +4,20 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Animatable from 'react-native-animatable';
 import { LinearGradient } from 'expo-linear-gradient';
 
-// Import VidyaSetu logo
+// Import CampusSentinel logo
 // TODO: Add your logo file to assets/logo-white.png
-const VidyaSetuLogo = require('../../assets/logo-white.png');
+const CampusSentinelLogo = require('../../assets/logo-white.png');
 
 const LoadingScreen = () => {
   const logoRef = useRef(null);
+  const [takingLong, setTakingLong] = React.useState(false);
 
   useEffect(() => {
+    // Show "Slow connection" message after 12 seconds
+    const timer = setTimeout(() => {
+      setTakingLong(true);
+    }, 12000);
+    
     // Start a continuous pulse animation for the logo
     if (logoRef.current) {
       logoRef.current.pulse(1500);
@@ -36,9 +42,9 @@ const LoadingScreen = () => {
         animation="fadeInDown"
         duration={1000}
       >
-        {/* VidyaSetu Logo - Replace with your custom logo */}
+        {/* CampusSentinel Logo - Replace with your custom logo */}
         <Image
-          source={VidyaSetuLogo}
+          source={CampusSentinelLogo}
           style={styles.logoImage}
           resizeMode="contain"
           onError={() => {
@@ -46,8 +52,8 @@ const LoadingScreen = () => {
             console.log('Logo file not found, using fallback icon');
           }}
         />
-        {/* Logo already contains the VidyaSetu text, so we can hide these or keep them for emphasis */}
-        {/* <Text style={styles.appTitle}>VidyaSetu</Text> */}
+        {/* Logo already contains the CampusSentinel text, so we can hide these or keep them for emphasis */}
+        {/* <Text style={styles.appTitle}>CampusSentinel</Text> */}
         <Text style={styles.subtitle}>Bridge of Knowledge</Text>
       </Animatable.View>
       
@@ -60,8 +66,17 @@ const LoadingScreen = () => {
           direction="alternate"
           duration={1000}
         >
-          Loading your dashboard...
+          {takingLong ? 'Still connecting to server...' : 'Loading your dashboard...'}
         </Animatable.Text>
+        {takingLong && (
+          <Animatable.Text 
+            style={styles.slowConnectionText}
+            animation="fadeIn"
+            duration={1000}
+          >
+            Connection seems slow. Please wait...
+          </Animatable.Text>
+        )}
       </View>
     </LinearGradient>
   );
@@ -105,6 +120,14 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '400',
     textAlign: 'center',
+  },
+  slowConnectionText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontWeight: '300',
+    textAlign: 'center',
+    fontStyle: 'italic'
   },
 });
 

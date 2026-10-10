@@ -234,10 +234,7 @@ const styles = StyleSheet.create({
     ...Platform.select({
       web: {
         transform: [{ scale: 1.02 }],
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.15,
-        shadowRadius: 8,
-        elevation: 8,
+        boxShadow: '0 6px 16px rgba(0, 0, 0, 0.12)',
       },
     }),
   },

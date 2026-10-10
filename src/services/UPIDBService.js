@@ -370,13 +370,7 @@ export class UPIDBService {
   static async createStudentFeeRecord(feeData) {
     try {
       // 🔍 DEBUG: Log the received feeData
-      console.log('🏦 UPIDBService - Received feeData:', {
-        studentId: feeData.studentId,
-        tenantId: feeData.tenantId,
-        feeComponent: feeData.feeComponent,
-        amount: feeData.amount,
-        paymentDate: feeData.paymentDate
-      });
+      // 🔍 DEBUG: Log the received feeData
       
       // Validate required fields
       if (!feeData.tenantId) {
@@ -509,7 +503,7 @@ export class UPIDBService {
    */
   static async submitStudentPaymentConfirmation(confirmationData) {
     try {
-      console.log('📝 UPIDBService - Submitting student payment confirmation:', confirmationData);
+
       
       // Update the UPI transaction status to pending verification (reference number already exists)
       const { data, error } = await supabase
@@ -556,7 +550,7 @@ export class UPIDBService {
         throw error;
       }
       
-      console.log('✅ Student payment confirmation submitted successfully:', data.id);
+
       return {
         id: data.id,
         transaction_id: data.id,
@@ -609,7 +603,7 @@ export class UPIDBService {
    */
   static async getPendingVerifications(tenantId) {
     try {
-      console.log('🔍 UPIDBService - Getting pending verifications for tenant:', tenantId);
+
       
       // Handle null tenantId - use email-based tenant lookup as fallback
       let effectiveTenantId = tenantId;
@@ -636,7 +630,7 @@ export class UPIDBService {
         }
         
         effectiveTenantId = userRecord.tenant_id;
-        console.log('✅ Found tenant via email lookup:', effectiveTenantId, 'for user:', user.email);
+        effectiveTenantId = userRecord.tenant_id;
       }
       
       // Query UPI transactions with all verification-related statuses for filtering
@@ -683,7 +677,7 @@ export class UPIDBService {
         throw error;
       }
       
-      console.log(`✅ Found ${data?.length || 0} pending payment verifications`);
+
       return data || [];
       
     } catch (error) {
@@ -706,7 +700,7 @@ export class UPIDBService {
    */
   static async adminVerifyPayment(verificationData) {
     try {
-      console.log('👨‍💼 UPIDBService - Admin verifying payment [FIXED]:', verificationData);
+
       
       const { paymentId, status, verifiedBy, remarks, tenantId } = verificationData;
       

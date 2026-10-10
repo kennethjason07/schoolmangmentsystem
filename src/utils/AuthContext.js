@@ -12,6 +12,47 @@ const AuthContext = createContext({});
 // Debug flag - set to false to disable verbose auth logging
 const DEBUG_AUTH_LOGS = false;
 
+// Storage keys for caching user profile and type
+const CACHE_KEYS = {
+  USER: 'cached_auth_user',
+  USER_TYPE: 'cached_auth_user_type',
+};
+
+// Caching helpers
+const getCachedAuthData = async () => {
+  try {
+    const [cachedUser, cachedUserType] = await Promise.all([
+      AsyncStorage.getItem(CACHE_KEYS.USER),
+      AsyncStorage.getItem(CACHE_KEYS.USER_TYPE),
+    ]);
+    return {
+      user: cachedUser ? JSON.parse(cachedUser) : null,
+      userType: cachedUserType || null,
+    };
+  } catch (error) {
+    if (DEBUG_AUTH_LOGS) console.warn('⚠️ Failed to load cached auth data:', error);
+    return { user: null, userType: null };
+  }
+};
+
+const setCachedAuthData = async (user, userType) => {
+  try {
+    if (user) {
+      await Promise.all([
+        AsyncStorage.setItem(CACHE_KEYS.USER, JSON.stringify(user)),
+        AsyncStorage.setItem(CACHE_KEYS.USER_TYPE, userType || ''),
+      ]);
+    } else {
+      await Promise.all([
+        AsyncStorage.removeItem(CACHE_KEYS.USER),
+        AsyncStorage.removeItem(CACHE_KEYS.USER_TYPE),
+      ]);
+    }
+  } catch (error) {
+    if (DEBUG_AUTH_LOGS) console.warn('⚠️ Failed to cache auth data:', error);
+  }
+};
+
 // Global upload state to optimize auth checks during uploads
 let isUploadInProgress = false;
 
@@ -26,7 +67,7 @@ export const useAuth = () => {
 // Upload state management helpers
 export const setUploadInProgress = (inProgress) => {
   isUploadInProgress = inProgress;
-  console.log(`📸 Upload state changed: ${inProgress ? 'IN PROGRESS' : 'COMPLETED'}`);
+  if (DEBUG_AUTH_LOGS) console.log(`📸 Upload state changed: ${inProgress ? 'IN PROGRESS' : 'COMPLETED'}`);
 };
 
 export const getUploadInProgress = () => isUploadInProgress;
@@ -56,61 +97,68 @@ export const AuthProvider = ({ children }) => {
   const lastErrorMessageRef = useRef(''); // Track last error to avoid spam
 
   // Web-specific debugging
-  if (Platform.OS === 'web') {
-    console.log('🌐 AuthProvider state:', { user: !!user, userType, loading });
-  }
+  // Logs removed for cleanup
 
   useEffect(() => {
     // Initialize auth state with refresh token error handling
     const initializeAuth = async () => {
       try {
-        console.log('🔄 Initializing authentication...');
-        
-        // Use shorter timeout for web platform to prevent hanging
-        const WEB_TIMEOUT = Platform.OS === 'web' ? 5000 : 10000;
+        // [FAST RECOVERY] Load from cache immediately to show UI faster
+        const cachedData = await getCachedAuthData();
+        if (cachedData.user) {
+          if (DEBUG_AUTH_LOGS) console.log('🚀 [AUTH] Fast recovery: Loaded profile from cache');
+          setUser(cachedData.user);
+          setUserType(cachedData.userType);
+          setLoading(false); // Allow UI to show instantly while we verify in background
+        }
+
+        // Use extremely generous timeout for web platform
+        const WEB_TIMEOUT = Platform.OS === 'web' ? 60000 : 70000;
         
         // First, validate and fix any session issues using AuthFix with timeout
-        const sessionResult = await Promise.race([
-          AuthFix.validateAndFixSession(),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Session validation timed out')), WEB_TIMEOUT)
-          )
-        ]);
+        // We now rely more on internal AuthFix timeouts which are more generous
+        const sessionResult = await AuthFix.validateAndFixSession();
         
         if (sessionResult.valid && sessionResult.session) {
           // Session is valid, proceed with normal auth handling
-          console.log('✅ Valid session found, proceeding with auth');
           await handleAuthChange(sessionResult.session.user);
         } else if (sessionResult.needsReauth) {
-          // Session is invalid or corrupted, clear everything
-          console.log('⚠️ Session invalid or missing, clearing auth state');
+          // Session is explicitly invalid or corrupted, clear everything
+          console.log('🧹 Session invalid, clearing auth state');
           setUser(null);
           setUserType(null);
         } else if (sessionResult.error) {
           // Only log error if it's different from the last one to reduce spam
           const errorMessage = sessionResult.error.message || 'Unknown error';
-          if (lastErrorMessageRef.current !== errorMessage) {
+          
+          // If it's a timeout, don't force sign out - the user might still have a valid session locally
+          if (errorMessage.includes('timed out')) {
+            console.warn('⏰ Auth initialization timed out - will retry in background');
+            // Try one more time to just get the user from Supabase directly as a fallback
+            const { data: { user: fallbackUser } } = await supabase.auth.getUser();
+            if (fallbackUser) {
+              console.log('✅ Fallback: Found user directly despite timeout');
+              await handleAuthChange(fallbackUser);
+            }
+          } else if (lastErrorMessageRef.current !== errorMessage) {
             console.error('❌ Session validation error:', sessionResult.error);
             lastErrorMessageRef.current = errorMessage;
-          }
-          
-          // Check if it's a refresh token error
-          if (errorMessage.includes('Invalid Refresh Token') || 
-              errorMessage.includes('Refresh Token Not Found')) {
-            if (lastErrorMessageRef.current !== errorMessage) {
-              console.log('🔧 Detected refresh token error, clearing auth data');
+            
+            // Check if it's a refresh token error - only THEN force sign out
+            if (errorMessage.includes('Invalid Refresh Token') || 
+                errorMessage.includes('Refresh Token Not Found')) {
+              await AuthFix.forceSignOut();
+              setUser(null);
+              setUserType(null);
             }
-            await AuthFix.forceSignOut();
-            setUser(null);
-            setUserType(null);
           }
         }
       } catch (error) {
         console.error('❌ Error initializing auth:', error);
         
-        // If it's any auth-related error, clear everything to be safe
-        if (error.message?.includes('refresh') || error.message?.includes('token') || error.message?.includes('Auth')) {
-          console.log('🧹 Auth error detected, clearing auth data');
+        // Only force sign out for absolute token failures, not network timeouts
+        if (error.message?.includes('refresh') || error.message?.includes('token')) {
+          if (DEBUG_AUTH_LOGS) console.log('🧹 Token error detected, clearing auth data');
           await AuthFix.forceSignOut();
           setUser(null);
           setUserType(null);
@@ -126,6 +174,11 @@ export const AuthProvider = ({ children }) => {
     // State to prevent multiple signout attempts
     let isHandlingSignOut = false;
 
+    // Cleanup cache when user is null
+    if (!user && !loading) {
+      setCachedAuthData(null, null);
+    }
+
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, sessionData) => {
@@ -140,11 +193,10 @@ export const AuthProvider = ({ children }) => {
             if (DEBUG_AUTH_LOGS) console.log('🔊 Handling auth state change for SIGNED_IN');
             await handleAuthChange(currentSession.user);
           } else if (event === 'SIGNED_IN' && isSigningInRef.current) {
-            console.log('⏭️ Skipping auth state handler - manual sign-in in progress');
+            // Manual sign-in in progress, skip handler
           } else if (event === 'SIGNED_OUT') {
             // Prevent multiple signout handling
             if (isHandlingSignOut) {
-              console.log('⏭️ Skipping SIGNED_OUT - already handling signout');
               return;
             }
             
@@ -173,14 +225,12 @@ export const AuthProvider = ({ children }) => {
             isHandlingSignOut = false;
             
           } else if (event === 'INITIAL_SESSION') {
-            console.log('🔊 Handling auth state change for INITIAL_SESSION');
             // This is the initial check - if no session, that's fine
             if (!currentSession?.user) {
-              console.log('No initial session found - this is normal for login screen');
               setLoading(false);
             }
           } else if (event === 'TOKEN_REFRESHED') {
-            console.log('🔄 Token refreshed successfully');
+            // Token refreshed successfully
           }
         } catch (error) {
           console.error('Error in auth state change handler:', error);
@@ -190,14 +240,10 @@ export const AuthProvider = ({ children }) => {
               error.message?.includes('token') || 
               error.message?.includes('Invalid') ||
               error.message?.includes('session')) {
-            console.log('🧹 Auth-specific error detected, clearing auth state');
             setUser(null);
             setUserType(null);
             setLoading(false);
             isSigningInRef.current = false;
-            
-            // Let AppNavigator handle navigation automatically when user state changes
-            console.log('✅ [AUTH] Auth error handled - AppNavigator will automatically navigate when needed');
           } else {
             console.warn('⚠️ Non-auth error in auth state handler, continuing:', error.message);
           }
@@ -212,20 +258,25 @@ export const AuthProvider = ({ children }) => {
   // The auth state is now managed through the auth state change listener and initial session check
 
   const handleAuthChange = async (authUser) => {
-    console.log('🔄 [AUTH] handleAuthChange called with user:', authUser?.email);
-    console.log('🔄 [AUTH] Full auth user object:', authUser);
+    if (DEBUG_AUTH_LOGS) {
+      console.log('🔄 [AUTH] handleAuthChange called with user:', authUser?.email);
+      console.log('🔄 [AUTH] Full auth user object:', authUser);
+    }
     try {
       if (!authUser) {
-        console.log('❌ [AUTH] No auth user provided, clearing state');
+        if (DEBUG_AUTH_LOGS) console.log('❌ [AUTH] No auth user provided, clearing state');
         setUser(null);
         setUserType(null);
+        setCachedAuthData(null, null); // Clear cache
         setLoading(false); // Ensure loading is false when no user
         return;
       }
 
-      console.log('👤 [AUTH] Fetching user profile for:', authUser.email);
-      console.log('👤 [AUTH] Auth user ID:', authUser.id);
-      console.log('👤 [AUTH] Auth user metadata:', authUser.user_metadata);
+      if (DEBUG_AUTH_LOGS) {
+        console.log('👤 [AUTH] Fetching user profile for:', authUser.email);
+        console.log('👤 [AUTH] Auth user ID:', authUser.id);
+        console.log('👤 [AUTH] Auth user metadata:', authUser.user_metadata);
+      }
       // First get user profile without roles join to avoid foreign key issues during signup
       // Use case-insensitive search for email with timeout
       let userProfile = null;
@@ -233,109 +284,59 @@ export const AuthProvider = ({ children }) => {
       let tenantId = null;
       
       try {
-        console.log('🔍 [AUTH] Starting user profile query...');
-        console.log('🔍 [AUTH] Supabase client status:', {
-          url: supabase.supabaseUrl,
-          key: supabase.supabaseKey ? 'Set' : 'Missing'
-        });
-        
-        // Skip health check if upload is in progress to prevent unnecessary timeouts
-        if (isUploadInProgress) {
-          console.log('⚡ Skipping health check - upload in progress');
-        } else {
-          // 🚑 CONNECTION HEALTH CHECK: Test basic connectivity first (with generous timeout)
-          console.log('🎡 Performing connection health check...');
-          try {
-            // Much more generous timeout - 15 seconds for health check
-            const HEALTH_CHECK_TIMEOUT = 15000;
-          
-          const healthCheck = await Promise.race([
-            supabase.from('users').select('count', { count: 'exact', head: true }).limit(0),
-            new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Health check timeout')), HEALTH_CHECK_TIMEOUT)
-            )
-          ]);
-          
-          if (healthCheck.error && !healthCheck.error.message?.includes('count')) {
-            console.warn('⚠️ Health check returned error, but continuing anyway:', healthCheck.error.message);
-            // Don't fail on health check errors - continue with normal auth process
-          }
-          
-          console.log('✅ Connection health check passed');
-        } catch (healthError) {
-          console.warn('⚠️ Connection health check failed:', healthError.message);
-          
-          // Only go to offline mode for severe network issues, not timeouts
-          if (healthError.message?.includes('Network request failed') || 
-              healthError.message?.includes('Unable to connect') ||
-              healthError.message?.includes('ERR_NETWORK') ||
-              healthError.message?.includes('ERR_INTERNET_DISCONNECTED')) {
-            
-            console.log('🚨 Network completely unavailable, using offline authentication');
-            const immediateUserData = {
-              id: authUser.id,
-              email: authUser.email,
-              role_id: 1,
-              tenant_id: 'offline-tenant',
-              photo_url: null,
-              full_name: authUser.user_metadata?.full_name || authUser.email.split('@')[0],
-              phone: authUser.user_metadata?.phone || '',
-              created_at: new Date().toISOString(),
-              is_fallback: true,
-              offline_mode: true
-            };
-            
-            console.log('🌐 Setting offline user due to network failure:', immediateUserData);
-            setUser(immediateUserData);
-            setUserType('admin');
-            setLoading(false);
-            return;
-          } else {
-            // For timeouts or other issues, continue with normal auth process
-            console.log('⚠️ Health check failed but network may be available - continuing with normal auth');
-          }
-        }
+        if (DEBUG_AUTH_LOGS) {
+          console.log('🔍 [AUTH] Starting user profile query...');
+          console.log('🔍 [AUTH] Supabase client status:', {
+            url: supabase.supabaseUrl,
+            key: supabase.supabaseKey ? 'Set' : 'Missing'
+          });
         }
         
-        // 📶 OPTIMIZED TIMEOUT: More aggressive for slow connections
-        let baseTimeout = Platform.OS === 'web' ? 15000 : 20000; // Much more generous timeout for slow networks
+        // SKIP health check to reduce network requests on startup
+        // The query below already has a robust retry mechanism
         
-        // Use a fixed reasonable timeout since health check timing isn't reliable
-        // In production, connection speed varies and timing the health check above is problematic
-        const DB_TIMEOUT = baseTimeout; // Use consistent timeout
+        // 📶 OPTIMIZED TIMEOUT: Very generous for slow connections
+        let baseTimeout = Platform.OS === 'web' ? 45000 : 60000; 
         
-        console.log(`📶 Using consistent timeout: ${DB_TIMEOUT}ms`);
+        // Use a fixed reasonable timeout
+        const DB_TIMEOUT = baseTimeout; 
+        
+        if (DEBUG_AUTH_LOGS) console.log(`📶 Using consistent timeout: ${DB_TIMEOUT}ms`);
         
         // First try with optimized exact email match
-        console.log('📧 [AUTH] Starting optimized query for email:', authUser.email);
+        if (DEBUG_AUTH_LOGS) console.log('📧 [AUTH] Starting optimized query for email:', authUser.email);
         
         // Add improved retry mechanism with exponential backoff
         const executeQueryWithRetry = async (query, retryCount = 0) => {
-          const MAX_RETRIES = 3; // More retries for very slow connections
-          const RETRY_DELAY = 2000; // Longer delay for network recovery
+          const MAX_RETRIES = 1; // Reduced to 1 retry for speed
+          const RETRY_DELAY = 1000; // 1 second delay
           
           try {
-            console.log(`📡 Executing query attempt ${retryCount + 1}/${MAX_RETRIES + 1}...`);
+            if (DEBUG_AUTH_LOGS) console.log(`📡 Executing query attempt ${retryCount + 1}/${MAX_RETRIES + 1}...`);
             
             // Create a new query instance to avoid stale connections
-              const freshQuery = supabase
+            // [OPTIMIZATION] Search by ID is significantly faster than email
+            const freshQuery = supabase
               .from('users')
               .select('id, email, role_id, tenant_id, full_name, profile_url, phone, created_at') // Specific fields only
-              .eq('email', authUser.email)
+              .eq('id', authUser.id)
               .limit(1) // Limit to 1 result for performance
               .maybeSingle();
             
+            let timeoutId;
             const result = await Promise.race([
               freshQuery,
-              new Promise((_, reject) => 
-                setTimeout(() => {
+              new Promise((_, reject) => {
+                timeoutId = setTimeout(() => {
                   console.warn('⏰ Query timeout after', DB_TIMEOUT, 'ms');
                   reject(new Error('Database query timed out'));
-                }, DB_TIMEOUT)
-              )
+                }, DB_TIMEOUT);
+              })
             ]);
             
-            console.log('✅ Query completed successfully');
+            if (timeoutId) clearTimeout(timeoutId);
+            
+            if (DEBUG_AUTH_LOGS) console.log('✅ Query completed successfully');
             return result;
             
           } catch (error) {
@@ -357,7 +358,7 @@ export const AuthProvider = ({ children }) => {
             
             if (shouldRetry) {
               
-              console.log(`🔁 Retrying in ${RETRY_DELAY}ms... (${retryCount + 2}/${MAX_RETRIES + 1})`);
+              if (DEBUG_AUTH_LOGS) console.log(`🔁 Retrying in ${RETRY_DELAY}ms... (${retryCount + 2}/${MAX_RETRIES + 1})`);
               await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
               
               return await executeQueryWithRetry(query, retryCount + 1);
@@ -370,16 +371,18 @@ export const AuthProvider = ({ children }) => {
         
         let result = await executeQueryWithRetry(null); // Pass null since we create query inside the retry function
         
-        console.log('📊 [AUTH] Exact email query result:', {
-          data: result.data,
-          error: result.error,
-          status: result.status,
-          statusText: result.statusText
-        });
+        if (DEBUG_AUTH_LOGS) {
+          console.log('📊 [AUTH] Exact email query result:', {
+            data: result.data,
+            error: result.error,
+            status: result.status,
+            statusText: result.statusText
+          });
+        }
         
         // If exact match fails, try case-insensitive
         if (!result.data && !result.error) {
-          console.log('🔄 Trying case-insensitive email search...');
+          if (DEBUG_AUTH_LOGS) console.log('🔄 Trying case-insensitive email search...');
           profileQuery = supabase
             .from('users')
             .select('*')
@@ -391,112 +394,48 @@ export const AuthProvider = ({ children }) => {
         userProfile = result.data;
         error = result.error;
         tenantId = userProfile?.tenant_id;
-        console.log('📄 User profile query completed:', { found: !!userProfile, error: !!error, tenantId });
+        if (DEBUG_AUTH_LOGS) console.log('📄 User profile query completed:', { found: !!userProfile, error: !!error, tenantId });
       } catch (queryError) {
         console.error('❌ User profile query failed:', queryError);
         error = queryError;
       }
 
-      console.log('📄 User profile query result:', { userProfile, error });
+      if (DEBUG_AUTH_LOGS) console.log('📄 User profile query result:', { userProfile, error });
 
       if (error) {
         console.error('❌ Error fetching user profile:', error);
-        
-        // Enhanced fallback authentication for any query failure - more immediate for timeouts
-        if (error.message?.includes('timeout') || 
-            error.message?.includes('network') || 
-            error.message?.includes('connection') ||
-            error.message?.includes('fetch') ||
-            error.name === 'AbortError') {
-          
-          console.log('🔄 Database connection issues detected, using enhanced fallback authentication');
-          console.log('🔧 Error details:', { message: error.message, name: error.name });
-          console.log('📝 This is normal for slow networks - app will work with fallback mode');
-          
-          // Create enhanced fallback user object from auth data
-          const fallbackUserData = {
-            id: authUser.id,
-            email: authUser.email,
-            role_id: 1, // Default to admin for fallback
-            tenant_id: 'fallback-tenant', // Provide fallback tenant
-            photo_url: null,
-            full_name: authUser.user_metadata?.full_name || authUser.email.split('@')[0],
-            phone: authUser.user_metadata?.phone || '',
-            created_at: new Date().toISOString(),
-            is_fallback: true // Flag to indicate this is fallback data
-          };
-          
-          console.log('🚨 Setting enhanced fallback user data:', fallbackUserData);
-          setUser(fallbackUserData);
-          setUserType('admin'); // Default to admin for fallback
-          setLoading(false);
-          
-          // Show a brief notification that we're using offline mode
-          if (Platform.OS === 'web') {
-            console.log('🌐 Running in fallback mode due to connection issues');
-          }
-          
-          return;
-        }
-        
-        // For other errors, still fail
-        return;
-      }
-
-      if (!userProfile) {
-        console.log('❌ User profile not found for:', authUser.email);
-        
-        // Try fallback for missing profile as well
-        console.log('🔄 Using fallback authentication for missing profile');
-        const fallbackUserData = {
-          id: authUser.id,
-          email: authUser.email,
-          role_id: 1, // Default to admin (hardcoded safe value)
-          photo_url: null,
-          full_name: authUser.email.split('@')[0],
-          phone: '',
-          created_at: new Date().toISOString()
-        };
-        
-        console.log('🚨 Setting fallback user data for missing profile:', fallbackUserData);
-        setUser(fallbackUserData);
-        setUserType('admin');
+        setUser(null);
+        setUserType(null);
         setLoading(false);
         return;
       }
 
-      console.log('✅ User profile found:', userProfile);
-      console.log('🎯 User role_id:', userProfile.role_id);
-      
-      // CRITICAL: Fix any users with invalid role_id in the database
-      if (!userProfile.role_id || userProfile.role_id === null || userProfile.role_id === undefined || 
-          typeof userProfile.role_id !== 'number' || userProfile.role_id < 1 || userProfile.role_id > 10) {
-        console.warn('🚨 [AuthContext] CRITICAL: User has invalid role_id in database:', userProfile.role_id);
-        console.log('🔧 [AuthContext] Fixing user role_id in database...');
-        
-        try {
-          // Update the user's role_id in the database to admin (1)
-          const { error: updateError } = await supabase
-            .from('users')
-            .update({ role_id: 1 })
-            .eq('id', authUser.id);
-          
-          if (updateError) {
-            console.error('❌ [AuthContext] Failed to update user role_id:', updateError);
-          } else {
-            console.log('✅ [AuthContext] Successfully fixed user role_id to 1 (admin)');
-            userProfile.role_id = 1; // Update the local copy too
-          }
-        } catch (fixError) {
-          console.error('❌ [AuthContext] Exception while fixing role_id:', fixError);
-          userProfile.role_id = 1; // Use fallback locally even if DB update fails
-        }
+      if (!userProfile) {
+        console.error('❌ User profile not found for:', authUser.email);
+        setUser(null);
+        setUserType(null);
+        setLoading(false);
+        return;
       }
 
-      // Try to get role name separately, but don't fail if it doesn't work
+      if (DEBUG_AUTH_LOGS) {
+        console.log('✅ User profile found:', userProfile);
+        console.log('🎯 User role_id:', userProfile.role_id);
+      }
+      
+      // Fail authorization if role_id is missing or invalid. Do NOT automatically promote to Admin.
+      if (!userProfile.role_id || typeof userProfile.role_id !== 'number' || userProfile.role_id < 1 || userProfile.role_id > 10) {
+        console.error('❌ [AuthContext] User has missing or invalid role_id in database:', userProfile.role_id);
+        setUser(null);
+        setUserType(null);
+        setLoading(false);
+        return;
+      }
+
+      // Try to get role name separately
       let roleName = null;
       if (userProfile.role_id) {
-        console.log('🔍 Looking up role name for role_id:', userProfile.role_id);
+        if (DEBUG_AUTH_LOGS) console.log('🔍 Looking up role name for role_id:', userProfile.role_id);
         try {
           const { data: roleData, error: roleError } = await supabase
             .from('roles')
@@ -504,34 +443,27 @@ export const AuthProvider = ({ children }) => {
             .eq('id', userProfile.role_id)
             .maybeSingle();
           
-          console.log('🏷️ Role lookup result:', { roleData, roleError });
-          
-          if (!roleError && roleData) {
+          if (!roleError && roleData && roleData.role_name) {
             roleName = roleData.role_name.toLowerCase();
-            console.log('✅ Found role in database:', roleName);
+            if (DEBUG_AUTH_LOGS) console.log('✅ Found role in database:', roleName);
           } else {
-            console.log('⚠️ Role lookup failed, using fallback. Error code:', roleError?.code, 'Message:', roleError?.message);
-            // Fallback role names for when database doesn't have roles yet
+            // Static mapping for known role IDs when database query for role name fails
             const roleMap = { 1: 'admin', 2: 'teacher', 3: 'parent', 4: 'student', 5: 'teacher', 6: 'teacher', 7: 'student', 8: 'parent' };
-            roleName = roleMap[userProfile.role_id] || 'user';
-            console.log('🔄 Using fallback role name:', roleName, 'for role_id:', userProfile.role_id);
-            
-            // Log specific error if it's the PGRST116 error
-            if (roleError?.code === 'PGRST116') {
-              console.log('🎯 PGRST116 detected in role lookup - role_id', userProfile.role_id, 'not found in roles table, but fallback applied successfully');
-            }
+            roleName = roleMap[userProfile.role_id] || null;
           }
         } catch (roleError) {
-          console.log('💥 Role lookup exception, using fallback:', roleError);
+          console.error('💥 Role lookup exception:', roleError);
           const roleMap = { 1: 'admin', 2: 'teacher', 3: 'parent', 4: 'student', 5: 'teacher', 6: 'teacher', 7: 'student', 8: 'parent' };
-          roleName = roleMap[userProfile.role_id] || 'user';
-          
-          if (roleError?.code === 'PGRST116') {
-            console.log('🎯 PGRST116 exception caught in role lookup - using fallback successfully');
-          }
+          roleName = roleMap[userProfile.role_id] || null;
         }
-      } else {
-        console.log('❌ No role_id found in user profile');
+      }
+
+      if (!roleName) {
+        console.error('❌ [AuthContext] Unable to resolve valid role for user');
+        setUser(null);
+        setUserType(null);
+        setLoading(false);
+        return;
       }
 
       // Ensure we have all required user data
@@ -548,12 +480,14 @@ export const AuthProvider = ({ children }) => {
         ...userProfile
       };
 
-      console.log('👤 Final user data:', userData);
-      console.log('🎭 Final role name:', roleName);
+      if (DEBUG_AUTH_LOGS) {
+        console.log('👤 Final user data:', userData);
+        console.log('🎭 Final role name:', roleName);
+      }
 
       // Set tenant context in SupabaseService if user has tenant_id
       if (userData.tenant_id) {
-        console.log('🏢 Setting tenant context:', userData.tenant_id);
+        if (DEBUG_AUTH_LOGS) console.log('🏢 Setting tenant context:', userData.tenant_id);
         supabaseService.setTenantContext(userData.tenant_id);
       }
 
@@ -563,23 +497,29 @@ export const AuthProvider = ({ children }) => {
       // Initialize push notifications (Android channels + token) for admin and teacher
       try {
         if (roleName === 'admin' || roleName === 'teacher') {
-          console.log('📱 [AUTH] Initializing push notifications for:', roleName, 'user:', userData.id);
+          if (DEBUG_AUTH_LOGS) console.log('📱 [AUTH] Initializing push notifications for:', roleName, 'user:', userData.id);
           const initResult = await pushNotificationService.initialize(userData.id, roleName);
           if (initResult) {
-            console.log('✅ [AUTH] Push notification initialization successful');
+            if (DEBUG_AUTH_LOGS) console.log('✅ [AUTH] Push notification initialization successful');
           } else {
             console.warn('⚠️ [AUTH] Push notification initialization failed or not supported');
           }
         } else {
-          console.log('📱 [AUTH] Skipping push notifications for role:', roleName);
+          if (DEBUG_AUTH_LOGS) console.log('📱 [AUTH] Skipping push notifications for role:', roleName);
         }
       } catch (e) {
         console.error('❌ [AUTH] Push notification init error:', e?.message);
         console.error('🔍 [AUTH] Error details:', e);
       }
 
+      setUser(userData);
+      setUserType(roleName);
+      
+      // [FAST RECOVERY] Cache the profile for next app reload
+      setCachedAuthData(userData, roleName);
+
       setLoading(false); // Ensure loading is false after successful auth state update
-      console.log('✅ Auth state updated successfully');
+      if (DEBUG_AUTH_LOGS) console.log('✅ Auth state updated successfully');
     } catch (error) {
       console.error('💥 Error in handleAuthChange:', error);
       setLoading(false); // Ensure loading is false on error
@@ -592,7 +532,7 @@ export const AuthProvider = ({ children }) => {
       isSigningInRef.current = true; // Prevent auth listener from interfering
       
       // Clear any existing invalid auth data before attempting sign in
-      console.log('🧹 Clearing any invalid auth data before sign in...');
+      if (DEBUG_AUTH_LOGS) console.log('🧹 Clearing any invalid auth data before sign in...');
       await AuthFix.forceSignOut();
       
       // Resolve tenant if subdomain provided
@@ -613,7 +553,7 @@ export const AuthProvider = ({ children }) => {
       }
       
       // Use AuthFix for safer sign in
-      console.log('🔐 Using AuthFix for safe sign in...');
+      if (DEBUG_AUTH_LOGS) console.log('🔐 Using AuthFix for safe sign in...');
       const signInResult = await AuthFix.signInSafely(email, password);
       
       if (!signInResult.success) {
@@ -622,18 +562,21 @@ export const AuthProvider = ({ children }) => {
       }
       
       const { user, session } = signInResult;
-      console.log('✅ AuthFix sign in successful for:', user.email);
+      if (DEBUG_AUTH_LOGS) console.log('✅ AuthFix sign in successful for:', user.email);
 
       // Get user profile (without roles join to avoid foreign key issues)
-      console.log('🔍 Querying user profile for email:', email);
-      console.log('🔍 Auth user info:', { id: user.id, email: user.email });
-      console.log('🔍 Target tenant ID:', targetTenantId);
+      if (DEBUG_AUTH_LOGS) {
+        console.log('🔍 Querying user profile for email:', email);
+        console.log('🔍 Auth user info:', { id: user.id, email: user.email });
+        console.log('🔍 Target tenant ID:', targetTenantId);
+      }
       
       // Try exact match first
+      // [OPTIMIZATION] Use ID lookup (Primary Key) for speed
       let userQuery = supabase
         .from('users')
         .select('*')
-        .eq('email', email);
+        .eq('id', user.id);
       
       // If tenant specified, filter by tenant - BUT NOT FOR PARENTS OR TEACHERS
       if (targetTenantId) {
@@ -649,15 +592,17 @@ export const AuthProvider = ({ children }) => {
         }
       }
       
-      console.log('📡 Executing exact match query...');
+      if (DEBUG_AUTH_LOGS) console.log('📡 Executing exact match query...');
       let { data: userProfile, error: profileError } = await userQuery.maybeSingle();
       
-      console.log('📊 Exact match result:');
-      console.log('   - Profile found:', !!userProfile);
-      console.log('   - Profile data:', userProfile);
-      console.log('   - Error:', profileError?.message || 'None');
-      console.log('   - Error code:', profileError?.code || 'None');
-      console.log('   - Error details:', profileError?.details || 'None');
+      if (DEBUG_AUTH_LOGS) {
+        console.log('📊 Exact match result:');
+        console.log('   - Profile found:', !!userProfile);
+        console.log('   - Profile data:', userProfile);
+        console.log('   - Error:', profileError?.message || 'None');
+        console.log('   - Error code:', profileError?.code || 'None');
+        console.log('   - Error details:', profileError?.details || 'None');
+      }
       
       // If exact match fails, try case-insensitive
       if (!userProfile && !profileError) {
@@ -681,17 +626,19 @@ export const AuthProvider = ({ children }) => {
           }
         }
         
-        console.log('📡 Executing case-insensitive query...');
+        if (DEBUG_AUTH_LOGS) console.log('📡 Executing case-insensitive query...');
         const result = await userQuery.maybeSingle();
         userProfile = result.data;
         profileError = result.error;
         
-        console.log('📊 Case-insensitive result:');
-        console.log('   - Profile found:', !!userProfile);
-        console.log('   - Profile data:', userProfile);
-        console.log('   - Error:', profileError?.message || 'None');
-        console.log('   - Error code:', profileError?.code || 'None');
-        console.log('   - Error details:', profileError?.details || 'None');
+        if (DEBUG_AUTH_LOGS) {
+          console.log('📊 Case-insensitive result:');
+          console.log('   - Profile found:', !!userProfile);
+          console.log('   - Profile data:', userProfile);
+          console.log('   - Error:', profileError?.message || 'None');
+          console.log('   - Error code:', profileError?.code || 'None');
+          console.log('   - Error details:', profileError?.details || 'None');
+        }
       }
 
       if (profileError) {
@@ -705,7 +652,7 @@ export const AuthProvider = ({ children }) => {
         return { data: null, error: { message: errorMsg } };
       }
 
-      console.log('User profile found:', { email: userProfile.email, role_id: userProfile.role_id });
+      if (DEBUG_AUTH_LOGS) console.log('User profile found:', { email: userProfile.email, role_id: userProfile.role_id });
 
       // Get role name separately with error handling
       let actualRoleName = null;
@@ -719,7 +666,7 @@ export const AuthProvider = ({ children }) => {
           
           if (!roleError && roleData) {
             actualRoleName = roleData.role_name;
-            console.log('Found role in database:', actualRoleName);
+            if (DEBUG_AUTH_LOGS) console.log('Found role in database:', actualRoleName);
           } else {
             console.log('Role lookup failed, using fallback. Error:', roleError?.message);
             // Fallback role names
@@ -743,7 +690,7 @@ export const AuthProvider = ({ children }) => {
       };
       const expectedRole = roleMap[selectedRole.toLowerCase()];
       
-      console.log('Role validation:', { actualRole: actualRoleName, expectedRole, selectedRole });
+      if (DEBUG_AUTH_LOGS) console.log('Role validation:', { actualRole: actualRoleName, expectedRole, selectedRole });
       
       // Special handling for parents and teachers - they don't need strict tenant filtering
       const isParentLogin = selectedRole.toLowerCase() === 'parent' || 
@@ -752,18 +699,14 @@ export const AuthProvider = ({ children }) => {
                             (actualRoleName && actualRoleName.toLowerCase() === 'teacher');
       const isParentOrTeacherLogin = isParentLogin || isTeacherLogin;
       
-      // Only validate role if we have both values (case-insensitive comparison)
-      // Skip role validation for parents/teachers since they might not have tenant_id
-      if (!isParentOrTeacherLogin && actualRoleName && expectedRole && 
-          actualRoleName.toLowerCase() !== expectedRole.toLowerCase()) {
+      if (!actualRoleName) {
+        console.error('❌ Authorization failed: Unable to verify user role in database');
+        return { data: null, error: { message: 'Unauthorized: Unable to verify user role' } };
+      }
+
+      if (expectedRole && actualRoleName.toLowerCase() !== expectedRole.toLowerCase()) {
         console.log('Role mismatch:', actualRoleName, 'vs expected:', expectedRole);
         return { data: null, error: { message: `Invalid role for this user. User has role: ${actualRoleName}, but trying to sign in as: ${expectedRole}` } };
-      }
-      
-      // If no role found, allow sign-in but log warning
-      if (!actualRoleName) {
-        console.log('⚠️ Warning: No role found for user, allowing sign-in with selected role');
-        actualRoleName = expectedRole || 'Teacher'; // Default fallback
       }
 
       const userData = {
@@ -779,44 +722,50 @@ export const AuthProvider = ({ children }) => {
         ...userProfile
       };
 
-      console.log('📋 Setting user and userType directly from signIn');
-      console.log('🌐 Platform:', Platform.OS);
-      console.log('👤 About to set user:', userData);
-      console.log('🎭 About to set userType:', actualRoleName ? actualRoleName.toLowerCase() : 'user');
+      if (DEBUG_AUTH_LOGS) {
+        console.log('📋 Setting user and userType directly from signIn');
+        console.log('🌐 Platform:', Platform.OS);
+        console.log('👤 About to set user:', userData);
+        console.log('🎭 About to set userType:', actualRoleName ? actualRoleName.toLowerCase() : 'user');
+      }
       
       // Set tenant context in SupabaseService - NEVER for teachers (they use direct auth)
       if (userData.tenant_id && !isParentOrTeacherLogin) {
-        console.log('🏢 Setting tenant context during signIn:', userData.tenant_id);
+        if (DEBUG_AUTH_LOGS) console.log('🏢 Setting tenant context during signIn:', userData.tenant_id);
         supabaseService.setTenantContext(userData.tenant_id);
       } else if (isParentLogin) {
-        console.log('👨‍👩‍👧 Parent login detected - bypassing tenant context for direct authentication');
+        if (DEBUG_AUTH_LOGS) console.log('👨‍👩‍👧 Parent login detected - bypassing tenant context for direct authentication');
       } else if (isTeacherLogin) {
-        console.log('👨‍🏫 Teacher login detected - bypassing tenant context for direct authentication');
+        if (DEBUG_AUTH_LOGS) console.log('👨‍🏫 Teacher login detected - bypassing tenant context for direct authentication');
       }
       
       setUser(userData);
-      setUserType(actualRoleName ? actualRoleName.toLowerCase() : 'user');
+      const finalRoleName = actualRoleName ? actualRoleName.toLowerCase() : 'user';
+      setUserType(finalRoleName);
+      
+      // [FAST RECOVERY] Cache the profile
+      setCachedAuthData(userData, finalRoleName);
       
       // Don't wait for auth state change listener - set loading to false immediately
       setLoading(false);
       
-      console.log('✅ State updated - loading set to false');
+      if (DEBUG_AUTH_LOGS) console.log('✅ State updated - loading set to false');
       
       // Clear the signing in flag after a short delay to allow auth listener to see it
       setTimeout(() => {
         isSigningInRef.current = false;
-        console.log('🚩 isSigningIn flag cleared');
+        if (DEBUG_AUTH_LOGS) console.log('🚩 isSigningIn flag cleared');
       }, 100);
       
       // Web-specific debugging
       if (Platform.OS === 'web') {
-        setTimeout(() => {
+        if (DEBUG_AUTH_LOGS) {
           console.log('🌐 Web debug - final state check:', { 
             user: !!userData, 
             userType: actualRoleName ? actualRoleName.toLowerCase() : 'user', 
             loading: false 
           });
-        }, 100);
+        }
       }
       
       return { data: userData, error: null };
@@ -830,9 +779,11 @@ export const AuthProvider = ({ children }) => {
   };
 
 const signUp = async (email, password, userData, tenantId = null, emailRedirectTo = undefined) => {
-    console.log('📝 Starting signup process for:', email);
-    console.log('📁 User data provided:', userData);
-    console.log('🏢 Tenant ID provided:', tenantId);
+    if (DEBUG_AUTH_LOGS) {
+      console.log('📝 Starting signup process for:', email);
+      console.log('📁 User data provided:', userData);
+      console.log('🏢 Tenant ID provided:', tenantId);
+    }
     try {
       setLoading(true);
       
@@ -865,7 +816,7 @@ const signUp = async (email, password, userData, tenantId = null, emailRedirectT
         }
       }
       
-      console.log('🔍 Checking if user already exists...');
+      if (DEBUG_AUTH_LOGS) console.log('🔍 Checking if user already exists...');
       // First check if user already exists in our users table
       const { data: existingUser, error: checkError } = await supabase
         .from('users')
@@ -879,16 +830,18 @@ const signUp = async (email, password, userData, tenantId = null, emailRedirectT
       }
       
       if (existingUser) {
-        console.log('❌ User already exists:', existingUser.email);
+        if (DEBUG_AUTH_LOGS) console.log('❌ User already exists:', existingUser.email);
         return { data: null, error: { message: 'An account with this email already exists. Please sign in instead.' } };
       }
       
-      console.log('✅ User does not exist, proceeding with signup');
-      console.log('🔒 Creating Supabase auth user...');
+      if (DEBUG_AUTH_LOGS) {
+        console.log('✅ User does not exist, proceeding with signup');
+        console.log('🔒 Creating Supabase auth user...');
+      }
       // Use Supabase Auth for signup
-const { data: { user, session }, error: authError } = await authHelpers.signUp(email, password, userData, emailRedirectTo);
+      const { data: { user, session }, error: authError } = await authHelpers.signUp(email, password, userData, emailRedirectTo);
       
-      console.log('🔒 Auth signup result:', { user: user?.email, session: !!session, authError });
+      if (DEBUG_AUTH_LOGS) console.log('🔒 Auth signup result:', { user: user?.email, session: !!session, authError });
       
       if (authError) {
         console.log('❌ Auth signup failed:', authError);
@@ -904,17 +857,21 @@ const { data: { user, session }, error: authError } = await authHelpers.signUp(e
         return { data: null, error: { message: 'Signup failed - no user created' } };
       }
 
-      console.log('✅ Auth user created successfully:', user.id);
-      console.log('📄 Creating user profile in database...');
+      if (DEBUG_AUTH_LOGS) {
+        console.log('✅ Auth user created successfully:', user.id);
+        console.log('📄 Creating user profile in database...');
+      }
       
       // Add user profile to users table
       // COMPREHENSIVE ROLE_ID VALIDATION - Multiple layers of safety checks
-      console.log('🔍 [AuthContext] Starting comprehensive role_id validation');
-      console.log('📊 [AuthContext] Original userData.role_id:', userData.role_id, '(type:', typeof userData.role_id, ')');
+      if (DEBUG_AUTH_LOGS) {
+        console.log('🔍 [AuthContext] Starting comprehensive role_id validation');
+        console.log('📊 [AuthContext] Original userData.role_id:', userData.role_id, '(type:', typeof userData.role_id, ')');
+      }
       
       // First validation layer (existing code)
       const safeRoleId = typeof userData.role_id === 'number' && !isNaN(userData.role_id) ? userData.role_id : 1;
-      console.log('🔍 [AuthContext] First validation result:', safeRoleId);
+      if (DEBUG_AUTH_LOGS) console.log('🔍 [AuthContext] First validation result:', safeRoleId);
       
       // Second validation layer - comprehensive safety check
       let finalRoleId = safeRoleId;
@@ -950,7 +907,7 @@ const { data: { user, session }, error: authError } = await authHelpers.signUp(e
         finalRoleId = 1; // Ultimate fallback
       }
       
-      console.log('✅ [AuthContext] Final validated role_id:', finalRoleId, '(type:', typeof finalRoleId, ')');
+      if (DEBUG_AUTH_LOGS) console.log('✅ [AuthContext] Final validated role_id:', finalRoleId, '(type:', typeof finalRoleId, ')');
       
       // Log the transformation if it occurred
       if (userData.role_id !== finalRoleId) {
@@ -969,7 +926,7 @@ const { data: { user, session }, error: authError } = await authHelpers.signUp(e
         linked_parent_of: userData.linked_parent_of || null
       };
 
-      console.log('📁 New user data to insert:', newUserData);
+      if (DEBUG_AUTH_LOGS) console.log('📁 New user data to insert:', newUserData);
 
       // Use insert instead of upsert for new users
       const { data: profileData, error: profileError } = await supabase
@@ -983,7 +940,7 @@ const { data: { user, session }, error: authError } = await authHelpers.signUp(e
       if (profileError) {
         console.error('❌ Profile creation error:', profileError);
         // If profile creation fails, clean up the auth session
-        console.log('🗑️ Cleaning up auth session due to profile creation failure');
+        if (DEBUG_AUTH_LOGS) console.log('🗑️ Cleaning up auth session due to profile creation failure');
         await supabase.auth.signOut();
         
         if (profileError.code === '23505') { // Unique constraint violation
@@ -995,12 +952,12 @@ const { data: { user, session }, error: authError } = await authHelpers.signUp(e
 
       // Skip role validation during signup since user isn't confirmed yet
       // Role will be validated during login
-      console.log('✅ Profile created successfully for unconfirmed user');
+      if (DEBUG_AUTH_LOGS) console.log('✅ Profile created successfully for unconfirmed user');
       
       // Create a basic role mapping for success message
       const roleNames = { 1: 'Admin', 2: 'Teacher', 3: 'Parent', 4: 'Student' };
       const roleName = roleNames[userData.role_id] || 'User';
-      console.log('🎭 Role name for response:', roleName);
+      if (DEBUG_AUTH_LOGS) console.log('🎭 Role name for response:', roleName);
 
       const completeUserData = {
         id: user.id,
@@ -1010,14 +967,14 @@ const { data: { user, session }, error: authError } = await authHelpers.signUp(e
         ...profileData
       };
 
-      console.log('🔒 Final user data before signout:', completeUserData);
+      if (DEBUG_AUTH_LOGS) console.log('🔒 Final user data before signout:', completeUserData);
 
       // Don't automatically log in after signup
       // Let the user manually login after signup
-      console.log('🚪 Signing out user after successful profile creation');
+      if (DEBUG_AUTH_LOGS) console.log('🚪 Signing out user after successful profile creation');
       await supabase.auth.signOut();
       
-      console.log('✅ Signup process completed successfully');
+      if (DEBUG_AUTH_LOGS) console.log('✅ Signup process completed successfully');
       return { data: completeUserData, error: null };
     } catch (error) {
       console.error('💥 Sign up error:', error);
@@ -1040,7 +997,7 @@ const { data: { user, session }, error: authError } = await authHelpers.signUp(e
       
       if (!session) {
         // No session exists, user is already logged out
-        console.log('No active session found, cleaning up local state');
+        if (DEBUG_AUTH_LOGS) console.log('No active session found, cleaning up local state');
         setUser(null);
         setUserType(null);
         
@@ -1071,7 +1028,7 @@ const { data: { user, session }, error: authError } = await authHelpers.signUp(e
           setUserType(null);
           
           // Let AppNavigator handle navigation automatically when user becomes null
-          console.log('✅ [AuthContext] User state cleared, AppNavigator will handle navigation');
+          if (DEBUG_AUTH_LOGS) console.log('✅ [AuthContext] User state cleared, AppNavigator will handle navigation');
           return { error: null };
         }
         // For other errors, continue with cleanup
@@ -1083,7 +1040,7 @@ const { data: { user, session }, error: authError } = await authHelpers.signUp(e
       setUserType(null);
       
       // Let AppNavigator handle navigation automatically when user becomes null
-      console.log('✅ [AuthContext] User state cleared, AppNavigator will handle navigation');
+      if (DEBUG_AUTH_LOGS) console.log('✅ [AuthContext] User state cleared, AppNavigator will handle navigation');
       
       return { error: null };
     } catch (error) {

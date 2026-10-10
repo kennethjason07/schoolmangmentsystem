@@ -232,14 +232,7 @@ export const SelectedStudentProvider = ({ children }) => {
   };
 
   // Debug logging
-  console.log('SelectedStudentContext - Functions available:', {
-    hasGetStudentClass: typeof getStudentClass === 'function',
-    hasGetStudentDisplayName: typeof getStudentDisplayName === 'function',
-    hasGetStudentAdmissionNo: typeof getStudentAdmissionNo === 'function',
-    hasSwitchStudent: typeof switchStudent === 'function',
-    selectedStudent: selectedStudent?.name || 'None',
-    availableStudentsCount: availableStudents.length
-  });
+  // Debug logging - Logs removed for cleanup
 
   return (
     <SelectedStudentContext.Provider value={value}>

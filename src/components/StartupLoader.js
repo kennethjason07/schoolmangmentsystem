@@ -18,17 +18,15 @@ const StartupLoader = ({ children }) => {
 
   useEffect(() => {
     const handleStartup = async () => {
-      console.log('🚀 StartupLoader: Handling app startup synchronization');
+      // Logs removed for cleanup
       
       // Wait for auth to complete first
       if (authLoading) {
-        console.log('🚀 StartupLoader: Waiting for auth to complete...');
         return;
       }
 
       // If no user, startup is complete (show login screen)
       if (!user) {
-        console.log('🚀 StartupLoader: No user found, startup complete');
         setStartupComplete(true);
         return;
       }
@@ -50,7 +48,6 @@ const StartupLoader = ({ children }) => {
 
       // If tenant initialization hasn't been attempted yet, try to initialize
       if (!tenantInitialized && !tenantLoading && !initializationAttempted) {
-        console.log('🚀 StartupLoader: Attempting to initialize tenant...');
         setInitializationAttempted(true);
         
         try {
@@ -86,7 +83,7 @@ const StartupLoader = ({ children }) => {
       const timeoutId = setTimeout(() => {
         console.log('🚀 StartupLoader: Safety timeout reached, forcing startup completion');
         setStartupComplete(true);
-      }, 10000); // 10 seconds max
+      }, 45000); // Increased to 45 seconds max
 
       return () => clearTimeout(timeoutId);
     };

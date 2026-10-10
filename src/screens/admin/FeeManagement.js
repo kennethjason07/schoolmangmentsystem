@@ -126,25 +126,15 @@ const FeeManagement = () => {
   // Enhanced tenant system handles initialization automatically
   React.useEffect(() => {
     if (tenantId && isReady) {
-      console.log('🚀 FeeManagement: Enhanced tenant system ready with ID:', tenantId);
-      // Initialize tenant helpers to ensure cache is set
       initializeTenantHelpers(tenantId);
-    } else {
-      console.log('⚠️ FeeManagement: Waiting for tenant context to be ready:', {
-        tenantId: tenantId || 'NULL',
-        isReady,
-        tenantLoading,
-        tenantError: tenantError?.message || 'none'
-      });
-    }
+    } 
   }, [tenantId, isReady, tenantLoading, tenantError]);
+
   
   // Enhanced tenant system handles initialization automatically - no manual init needed
 
   // Add safe date formatting function at the top
-  const formatSafeDate = (dateValue) => {
-    console.log('formatSafeDate input:', dateValue, typeof dateValue); // Debug log
-    
+  const formatSafeDate = (dateValue) => {    
     if (!dateValue) return 'No date selected';
     
     try {
@@ -189,7 +179,7 @@ const FeeManagement = () => {
 
     try {
       const tId = await getEffectiveTenantId();
-      console.log('🔍 FeeManagement: Calculating fee stats (OPTIMIZED) for tenant:', tId);
+      // console.log('🔍 FeeManagement: Calculating fee stats (OPTIMIZED) for tenant:', tId);
       
       // 🚀 ULTRA-FAST: Single query with aggregation
       const { data: statsData, error: statsError } = await supabase
@@ -224,7 +214,7 @@ const FeeManagement = () => {
       // Fast set-based calculation for pending students
       const studentsWithPayments = new Set((paymentsData || []).map(fee => fee.student_id));
       const pendingStudents = (studentCount || 0) - studentsWithPayments.size;
-      console.log('FeeManagement - OPTIMIZED Fee Stats - Total Paid Amount:', totalPaid);
+      // console.log('FeeManagement - OPTIMIZED Fee Stats - Total Paid Amount:', totalPaid);
       setFeeStats({ totalDue, totalPaid, pendingStudents });
       
     } catch (error) {
@@ -260,7 +250,7 @@ const FeeManagement = () => {
   // 🚀 ULTRA-FAST refresh with intelligent cache management
   const refreshWithCacheClear = async () => {
     if (checkTenantReady()) {
-      console.log('🔄 FeeManagement: Ultra-fast refresh with smart cache management');
+      // console.log('🔄 FeeManagement: Ultra-fast refresh with smart cache management');
       
       // Intelligent cache clearing - only clear relevant caches
       setOptimizedData(null);
@@ -304,7 +294,7 @@ const FeeManagement = () => {
   const hasInitiallyLoaded = useRef(false);
   useEffect(() => {
     if (checkTenantReady() && !hasInitiallyLoaded.current) {
-      console.log('🚀 FeeManagement: Enhanced tenant system ready, loading data...');
+      // console.log('🚀 FeeManagement: Enhanced tenant system ready, loading data...');
       // Ensure tenant helpers are initialized
       initializeTenantHelpers(tenantId);
       hasInitiallyLoaded.current = true;
@@ -474,7 +464,7 @@ const FeeManagement = () => {
   const isLoadingRef = useRef(false);
   const loadAllData = async () => {
     if (!checkTenantReady() || isLoadingRef.current) {
-      console.log('⚠️ FeeManagement: Cannot load data - tenant not ready or already loading');
+      // console.log('⚠️ FeeManagement: Cannot load data - tenant not ready or already loading');
       return;
     }
     
@@ -486,17 +476,22 @@ const FeeManagement = () => {
       setRefreshing(true);
       setLoadingProgress({ step: 1, message: 'Loading data...' });
 
-      console.log('🚀 FeeManagement: Starting ULTRA-FAST batch loading...');
+      setLoading(true);
+      setRefreshing(true);
+      setLoadingProgress({ step: 1, message: 'Loading data...' });
+
+      // console.log('🚀 FeeManagement: Starting ULTRA-FAST batch loading...');
       
       // 🚀 ULTRA-FAST BATCH LOADING - Single Query with All Data
       const result = await loadAllDataUltraFast();
       
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
-      console.log(`✅ FeeManagement: ULTRA-FAST loading completed in ${loadTime}ms`);
+      // console.log(`✅ FeeManagement: ULTRA-FAST loading completed in ${loadTime}ms`);
       
       setLoadingProgress({ step: 4, message: 'Complete' });
       
+      /* 
       if (loadTime < 500) {
         console.log('🚀 EXCELLENT PERFORMANCE: Data loaded in under 500ms!');
       } else if (loadTime < 1000) {
@@ -504,6 +499,7 @@ const FeeManagement = () => {
       } else {
         console.warn('⚠️ SLOW PERFORMANCE: Consider database optimization');
       }
+      */
 
     } catch (error) {
       const endTime = performance.now();
@@ -511,10 +507,10 @@ const FeeManagement = () => {
       console.error(`❌ FeeManagement: Ultra-fast loading failed after ${loadTime}ms:`, error);
       
       try {
-        console.log('🔄 Falling back to optimized loading...');
+        // console.log('🔄 Falling back to optimized loading...');
         await loadAllDataOptimized();
       } catch (fallbackError) {
-        console.error('❌ FeeManagement: All loading methods failed:', fallbackError);
+        console.error('FeeManagement: All loading methods failed:', fallbackError);
         Alert.alert('Error', `Failed to load fee data: ${fallbackError.message}`);
       }
     } finally {
@@ -526,7 +522,7 @@ const FeeManagement = () => {
 
   // 🚀 ULTRA-FAST BATCH LOADING - Revolutionary Performance Optimization
   const loadAllDataUltraFast = async () => {
-    console.log('⚡ Starting ULTRA-FAST batch loading with optimized parallel queries...');
+    // console.log('⚡ Starting ULTRA-FAST batch loading with optimized parallel queries...');
     
     // 🔥 OPTIMIZED APPROACH: Use parallel queries instead of complex joins
     const batchStartTime = performance.now();
@@ -586,7 +582,7 @@ const FeeManagement = () => {
     });
     
     const batchEndTime = performance.now();
-    console.log(`🚀 Database batch completed in ${Math.round(batchEndTime - batchStartTime)}ms`);
+    // console.log(`🚀 Database batch completed in ${Math.round(batchEndTime - batchStartTime)}ms`);
     
     // 🔥 IN-MEMORY PROCESSING: Lightning-fast data transformation
     const processingStartTime = performance.now();
@@ -600,7 +596,7 @@ const FeeManagement = () => {
     );
     
     const processingEndTime = performance.now();
-    console.log(`⚡ In-memory processing completed in ${Math.round(processingEndTime - processingStartTime)}ms`);
+    // console.log(`⚡ In-memory processing completed in ${Math.round(processingEndTime - processingStartTime)}ms`);
     
     // 🎯 Set all state in single batch
     setClasses(processedData.classes);
@@ -611,7 +607,7 @@ const FeeManagement = () => {
     setPaymentSummary(processedData.summary);
     setFeeStats(processedData.feeStats);
     
-    console.log('✅ ULTRA-FAST loading complete - all data processed and set!');
+    // console.log('✅ ULTRA-FAST loading complete - all data processed and set!');
     
     return processedData;
   };
@@ -621,7 +617,7 @@ const FeeManagement = () => {
   
   // 🔄 Optimized fallback method (still faster than original)
   const loadAllDataOptimized = async () => {
-    console.log('⚡ Using optimized parallel loading as fallback...');
+    // console.log('⚡ Using optimized parallel loading as fallback...');
     
     // Parallel data loading with optimized queries including discounts
     const [
@@ -666,13 +662,13 @@ const FeeManagement = () => {
   
   // Optimized data processor for fallback method
   const processOptimizedData = (classesData, feeStructuresData, studentsData, paymentsData, studentDiscountsData = []) => {
-    console.log('🔍 Processing fee data with discount support...', {
+    /* console.log('🔍 Processing fee data with discount support...', {
       classes: classesData.length,
       feeStructures: feeStructuresData.length,
       students: studentsData.length,
       payments: paymentsData.length,
       discounts: studentDiscountsData.length
-    });
+    }); */
     
     // Create efficient lookup maps
     const classLookup = new Map();
@@ -736,10 +732,10 @@ const FeeManagement = () => {
           console.log(`💰 Applied ${applicableDiscount.discount_value}% discount for ${studentId}: ${feeComponent} = ₹${feeAmount}`);
         } else if (applicableDiscount.discount_type === 'fixed_amount') {
           feeAmount = Math.max(0, feeAmount - parseFloat(applicableDiscount.discount_value));
-          console.log(`💰 Applied ₹${applicableDiscount.discount_value} discount for ${studentId}: ${feeComponent} = ₹${feeAmount}`);
+          // console.log(`💰 Applied ₹${applicableDiscount.discount_value} discount for ${studentId}: ${feeComponent} = ₹${feeAmount}`);
         }
       } else {
-        console.log(`💵 Class fee for ${studentId}: ${feeComponent} = ₹${feeAmount} (no discount)`);
+        // console.log(`💵 Class fee for ${studentId}: ${feeComponent} = ₹${feeAmount} (no discount)`);
       }
       
       return feeAmount;
@@ -786,10 +782,7 @@ const FeeManagement = () => {
       const studentsInClass = studentsData.filter(s => s.class_id === classData.id);
       const feeStructuresForClass = feesByClass.get(classData.id) || [];
       
-      console.log(`📊 Processing class ${classData.class_name}${classData.section ? '-' + classData.section : ''}:`, {
-        students: studentsInClass.length,
-        feeComponents: feeStructuresForClass.length
-      });
+      // console.log(`📊 Processing class ${classData.class_name}${classData.section ? '-' + classData.section : ''}:`, { ... });
       
       let classExpectedFees = 0;
       let classPaidAmount = 0;
@@ -807,7 +800,7 @@ const FeeManagement = () => {
             const feeAmount = parseFloat(fee.amount || fee.base_amount || 0);
             studentExpectedFees += feeAmount;
             processedComponents.add(fee.fee_component);
-            console.log(`📦 Student-specific fee for ${student.name}: ${fee.fee_component} = ₹${feeAmount}`);
+            // console.log(`📦 Student-specific fee for ${student.name}: ${fee.fee_component} = ₹${feeAmount}`);
           }
         });
         
@@ -818,7 +811,7 @@ const FeeManagement = () => {
             studentExpectedFees += studentFeeAmount;
             processedComponents.add(fee.fee_component);
           } else {
-            console.log(`⚠️ Skipping class fee for ${student.name}: ${fee.fee_component} (student-specific fee exists)`);
+            // console.log(`⚠️ Skipping class fee for ${student.name}: ${fee.fee_component} (student-specific fee exists)`);
           }
         });
         
@@ -826,20 +819,25 @@ const FeeManagement = () => {
         
         // Calculate how much this student has paid
         const studentPayments = paymentsByStudent.get(student.id) || [];
-        const studentTotalPaid = studentPayments.reduce((sum, p) => 
-          sum + (parseFloat(p.amount_paid) || 0), 0);
+        const studentTotalPaid = studentPayments.reduce((sum, p) => {
+          // Filter payments by academic year to ensure we only count payments for this class's year
+          if (classData.academic_year && p.academic_year && p.academic_year !== classData.academic_year) {
+            return sum;
+          }
+          return sum + (parseFloat(p.amount_paid) || 0);
+        }, 0);
         
         classPaidAmount += studentTotalPaid;
         if (studentTotalPaid > 0) classStudentsWithPayments++;
         
-        console.log(`  Student ${student.name}: Expected=₹${studentExpectedFees}, Paid=₹${studentTotalPaid}`);
+        // console.log(`  Student ${student.name}: Expected=₹${studentExpectedFees}, Paid=₹${studentTotalPaid}`);
       });
       
       const classOutstanding = Math.max(0, classExpectedFees - classPaidAmount);
       const collectionRate = classExpectedFees > 0 ? 
         Math.round((classPaidAmount / classExpectedFees) * 10000) / 100 : 0;
       
-      console.log(`  Class totals: Expected=₹${classExpectedFees}, Collected=₹${classPaidAmount}, Outstanding=₹${classOutstanding}`);
+      // console.log(`  Class totals: Expected=₹${classExpectedFees}, Collected=₹${classPaidAmount}, Outstanding=₹${classOutstanding}`);
       
       // Calculate total fee per student for display (average)
       const avgFeePerStudent = studentsInClass.length > 0 ? classExpectedFees / studentsInClass.length : 0;
@@ -865,10 +863,7 @@ const FeeManagement = () => {
     // ✅ FIXED: Calculate total outstanding from total due and total collected to ensure mathematical consistency
     totalOutstanding = Math.max(0, totalDue - totalCollected);
     
-    console.log('🔧 Recalculated Outstanding for consistency:', {
-      calculatedOutstanding: `₹${totalOutstanding}`,
-      formula: `max(0, ${totalDue} - ${totalCollected})`
-    });
+    // console.log('🔧 Recalculated Outstanding for consistency:', { ... });
     
     // Sort data
     classStats.sort((a, b) => b.outstanding - a.outstanding);
@@ -877,13 +872,13 @@ const FeeManagement = () => {
     const overallCollectionRate = totalDue > 0 ? 
       Math.round((totalCollected / totalDue) * 10000) / 100 : 0;
     
-    console.log('✅ Fee calculation completed with discount support:', {
+    /* console.log('✅ Fee calculation completed with discount support:', {
       totalDue: `₹${totalDue}`,
       totalCollected: `₹${totalCollected}`,
       totalOutstanding: `₹${totalOutstanding}`,
       collectionRate: `${overallCollectionRate}%`,
       classesProcessed: classStats.length
-    });
+    }); */
     
     return {
       classes: classesData,
@@ -2315,11 +2310,18 @@ const styles = StyleSheet.create({
   },
   activeTab: {
     backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
     elevation: 2,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+      },
+      web: {
+        boxShadow: '0px 1px 2px rgba(0, 0, 0, 0.1)',
+      }
+    }),
   },
   tabText: {
     fontSize: 14,
@@ -2342,11 +2344,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
     elevation: 3,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      web: {
+        boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)',
+      }
+    }),
   },
   classHeader: {
     flexDirection: 'row',
@@ -2545,10 +2554,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      },
+    }),
     zIndex: 1000,
   },
   fabWeb: {
@@ -2661,11 +2677,18 @@ const styles = StyleSheet.create({
     marginVertical: 8,
     marginHorizontal: 16,
     borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
     elevation: 3,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+    }),
   },
   paymentStudentName: {
     fontSize: 16,
@@ -2736,11 +2759,18 @@ const styles = StyleSheet.create({
     padding: 16,
     marginVertical: 8,
     borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
     elevation: 3,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+    }),
   },
   statisticLabel: {
     fontSize: 16,
@@ -2791,10 +2821,17 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
     elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+    }),
   },
   classStatHeader: {
     flexDirection: 'row',

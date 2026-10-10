@@ -28,17 +28,21 @@ export const setCachedTenantId = (tenantId) => {
   _tenantInitialized = true;
   _lastAccessTime = Date.now();
   _accessCount = 0;
-  
-  console.log('🚀 Shared TenantUtils: Cached tenant ID set:', tenantId);
 };
 
 export const getCachedTenantId = () => {
   _accessCount++;
   _lastAccessTime = Date.now();
   
+  // 🚀 OPTIMIZED: Reduce noise by only warning if the app has had time to initialize
   if (!_tenantInitialized || !_cachedTenantId) {
-    console.warn('⚠️ Shared TenantUtils: Tenant not initialized yet. Make sure to initialize tenant before using database services.');
-    console.warn('📊 Access Count:', _accessCount, 'Last Access:', new Date(_lastAccessTime || 0).toISOString());
+    const appUptime = Date.now() - (_lastAccessTime || Date.now()); // Fallback for first access
+    
+    // Only warn if accessed multiple times or after a short grace period (3 seconds)
+    // This avoids warnings during the normal rapid startup sequence
+    if (_accessCount > 5 || appUptime > 3000) {
+      // Warnings suppressed as per user request
+    }
     return null;
   }
   
@@ -52,8 +56,6 @@ export const clearCachedTenantId = () => {
   _tenantInitialized = false;
   _lastAccessTime = null;
   _accessCount = 0;
-  
-  console.log('🧹 Shared TenantUtils: Cached tenant ID cleared');
 };
 
 export const getTenantCacheStats = () => {
@@ -76,7 +78,6 @@ export const initializeTenantHelpers = (tenantId) => {
 
 export const resetTenantHelpers = () => {
   clearCachedTenantId();
-  console.log('🧹 Shared TenantUtils: Reset completed');
 };
 
 // Legacy compatibility

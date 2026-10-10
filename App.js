@@ -21,8 +21,8 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <TenantProvider>
-        <AuthProvider>
+      <AuthProvider>
+        <TenantProvider>
           <StartupLoader>
             <SelectedStudentProvider>
               <GlobalRefreshProvider>
@@ -31,8 +31,8 @@ export default function App() {
               </GlobalRefreshProvider>
             </SelectedStudentProvider>
           </StartupLoader>
-        </AuthProvider>
-      </TenantProvider>
+        </TenantProvider>
+      </AuthProvider>
     </SafeAreaProvider>
   );
 }

@@ -1,7 +1,18 @@
-import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
-import { Platform } from 'react-native';
+
+// Dynamically import Notifications to prevent web warnings
+const Notifications = Platform.OS === 'web' ? {
+  setNotificationHandler: () => {},
+  getPermissionsAsync: async () => ({ status: 'undetermined' }),
+  requestPermissionsAsync: async () => ({ status: 'undetermined' }),
+  getExpoPushTokenAsync: async () => ({ data: '' }),
+  setNotificationChannelAsync: async () => {},
+  addNotificationReceivedListener: () => ({ remove: () => {} }),
+  addNotificationResponseReceivedListener: () => ({ remove: () => {} }),
+  removeNotificationSubscription: () => {},
+} : require('expo-notifications');
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, TABLES } from '../utils/supabase';
 
@@ -12,21 +23,24 @@ import { supabase, TABLES } from '../utils/supabase';
  */
 
 // Configure notification behavior
-Notifications.setNotificationHandler({
-  handleNotification: async (notification) => {
-    const { data } = notification.request.content;
-    
-    // Check if app is in foreground and user is in the chat with sender
-    const isInRelevantChat = await checkIfInRelevantChat(data);
-    
-    return {
-      shouldShowAlert: !isInRelevantChat, // Don't show alert if user is already in the chat
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-      priority: data.priority || Notifications.AndroidNotificationPriority.HIGH,
-    };
-  },
-});
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async (notification) => {
+      const { data } = notification.request.content;
+      
+      // Check if app is in foreground and user is in the chat with sender
+      const isInRelevantChat = await checkIfInRelevantChat(data);
+      
+      return {
+        shouldShowAlert: !isInRelevantChat, // Don't show alert if user is already in the chat
+        shouldPlaySound: true,
+        shouldSetAlert: true,
+        shouldSetBadge: true,
+        priority: data.priority || Notifications.AndroidNotificationPriority.HIGH,
+      };
+    },
+  });
+}
 
 class PushNotificationService {
   constructor() {
@@ -50,7 +64,6 @@ class PushNotificationService {
 
       // Skip push notifications on web (requires VAPID configuration)
       if (Platform.OS === 'web') {
-        console.log('ℹ️ Push notifications skipped on web platform');
         return false;
       }
 

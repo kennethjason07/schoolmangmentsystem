@@ -113,6 +113,18 @@ const ManageStudents = () => {
     reload();
   }, [selectedClass, selectedSection, selectedGender, selectedAcademicYear]);
 
+  // Handle search with debounce
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (resolvedTenantId) {
+        setPage(0);
+        setHasMore(true);
+        loadStudentsPage(0, true, resolvedTenantId, search);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [search, resolvedTenantId]);
+
   // Load all data
   const loadAllData = async () => {
     setLoading(true);
@@ -154,10 +166,10 @@ const ManageStudents = () => {
   };
 
   // Load one page of students with full details - with server-side filters and pagination
-  const loadStudentsPage = async (pageNumber = 0, replace = false, tenantIdParam = null) => {
+  const loadStudentsPage = async (pageNumber = 0, replace = false, tenantIdParam = null, searchQuery = search) => {
     const startTime = performance.now(); // 📊 Performance monitoring
     try {
-      console.log('🚀 Loading students page with server-side filters...');
+      console.log('🚀 Loading students page with server-side filters...', { searchQuery });
       const tenantId = tenantIdParam || resolvedTenantId;
       if (!tenantId) throw new Error('Tenant not resolved');
 
@@ -195,6 +207,19 @@ const ManageStudents = () => {
           )
         `)
         .eq('tenant_id', tenantId);
+
+      // Apply search filter if present
+      if (searchQuery && searchQuery.trim()) {
+        const query = searchQuery.trim();
+        // Check if query is numeric for roll_no search
+        const isNumeric = !isNaN(query);
+        
+        if (isNumeric) {
+          studentsQuery = studentsQuery.or(`name.ilike.%${query}%,admission_no.ilike.%${query}%,roll_no.eq.${query}`);
+        } else {
+          studentsQuery = studentsQuery.or(`name.ilike.%${query}%,admission_no.ilike.%${query}%`);
+        }
+      }
 
       if (classIdsFilter) {
         studentsQuery = studentsQuery.in('class_id', classIdsFilter);
@@ -3036,11 +3061,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#4CAF50',
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 8,
+      },
+      web: {
+        boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
+      }
+    }),
   },
 
   // Futuristic Modal Styles
@@ -3076,6 +3110,9 @@ const styles = StyleSheet.create({
       android: {
         elevation: 20,
       },
+      web: {
+        boxShadow: '0 10px 20px rgba(0,0,0,0.3)',
+      }
     }),
   },
   glassModalHeader: {
@@ -3111,15 +3148,30 @@ const styles = StyleSheet.create({
       android: {
         elevation: 10,
       },
+      web: {
+        boxShadow: '0 5px 15px rgba(102, 126, 234, 0.8)',
+      }
     }),
   },
   profileAvatarText: {
     fontSize: 32,
     fontWeight: 'bold',
     color: '#FFFFFF',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 5,
+    ...Platform.select({
+      ios: {
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 5,
+      },
+      android: {
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 5,
+      },
+      web: {
+        textShadow: '1px 1px 5px rgba(0, 0, 0, 0.3)',
+      }
+    }),
   },
   futuristicModalTitle: {
     fontSize: 24,
@@ -3127,17 +3179,41 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: 8,
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 5,
+    ...Platform.select({
+      ios: {
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 5,
+      },
+      android: {
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 5,
+      },
+      web: {
+        textShadow: '1px 1px 5px rgba(0, 0, 0, 0.3)',
+      }
+    }),
   },
   futuristicModalSubtitle: {
     fontSize: 16,
     color: 'rgba(255, 255, 255, 0.8)',
     textAlign: 'center',
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
+    ...Platform.select({
+      ios: {
+        textShadowColor: 'rgba(0, 0, 0, 0.2)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 3,
+      },
+      android: {
+        textShadowColor: 'rgba(0, 0, 0, 0.2)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 3,
+      },
+      web: {
+        textShadow: '1px 1px 3px rgba(0, 0, 0, 0.2)',
+      }
+    }),
   },
   closeButton: {
     position: 'absolute',
@@ -3174,6 +3250,9 @@ const styles = StyleSheet.create({
       android: {
         elevation: 5,
       },
+      web: {
+        boxShadow: '0 5px 10px rgba(255, 255, 255, 0.1)',
+      }
     }),
   },
   cardHeader: {
@@ -3197,9 +3276,21 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#FFFFFF',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
+    ...Platform.select({
+      ios: {
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 3,
+      },
+      android: {
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 3,
+      },
+      web: {
+        textShadow: '1px 1px 3px rgba(0, 0, 0, 0.3)',
+      }
+    }),
   },
   infoGrid: {
     flexDirection: 'row',
@@ -3221,9 +3312,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+    ...Platform.select({
+      ios: {
+        textShadowColor: 'rgba(0, 0, 0, 0.2)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 2,
+      },
+      android: {
+        textShadowColor: 'rgba(0, 0, 0, 0.2)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 2,
+      },
+      web: {
+        textShadow: '1px 1px 2px rgba(0, 0, 0, 0.2)',
+      }
+    }),
   },
   performanceStats: {
     flexDirection: 'row',
@@ -3249,9 +3352,21 @@ const styles = StyleSheet.create({
   statPercent: {
     fontSize: 16,
     fontWeight: 'bold',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
+    ...Platform.select({
+      ios: {
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 3,
+      },
+      android: {
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 3,
+      },
+      web: {
+        textShadow: '1px 1px 3px rgba(0, 0, 0, 0.3)',
+      }
+    }),
   },
   statLabel: {
     fontSize: 12,
@@ -3309,6 +3424,9 @@ const styles = StyleSheet.create({
       android: {
         elevation: 10,
       },
+      web: {
+        boxShadow: '0 5px 15px rgba(78, 205, 196, 0.6)',
+      }
     }),
   },
 
@@ -3326,11 +3444,20 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 400,
     maxHeight: '85%',
-    elevation: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.3,
-    shadowRadius: 15,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 5 },
+        shadowOpacity: 0.3,
+        shadowRadius: 15,
+      },
+      android: {
+        elevation: 20,
+      },
+      web: {
+        boxShadow: '0 5px 15px rgba(0,0,0,0.3)',
+      }
+    }),
   },
   cleanModalHeader: {
     flexDirection: 'row',
@@ -3354,11 +3481,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 15,
-    elevation: 3,
-    shadowColor: '#2196F3',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#2196F3',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 3,
+      },
+      web: {
+        boxShadow: '0 2px 4px rgba(33, 150, 243, 0.3)',
+      }
+    }),
   },
   cleanAvatarText: {
     fontSize: 24,
@@ -3397,13 +3533,22 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     marginBottom: 15,
     padding: 20,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
     borderWidth: 1,
     borderColor: '#F5F5F5',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+      web: {
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+      }
+    }),
   },
   cleanCardHeader: {
     flexDirection: 'row',
@@ -3469,11 +3614,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
-    elevation: 1,
-    shadowColor: '#4CAF50',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
+    borderWidth: 2,
+    borderColor: '#F0F0F0', // Replaced rgba with solid for simplicity or consistent look
+    ...Platform.select({
+      ios: {
+        shadowColor: '#4CAF50',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+      },
+      android: {
+        elevation: 1,
+      },
+      web: {
+        boxShadow: '0 1px 2px rgba(76, 175, 80, 0.2)',
+      }
+    }),
   },
   cleanStatNumber: {
     fontSize: 16,
@@ -3501,11 +3657,20 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 12,
-    elevation: 3,
-    shadowColor: '#4CAF50',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#4CAF50',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 3,
+      },
+      web: {
+        boxShadow: '0 2px 4px rgba(76, 175, 80, 0.3)',
+      }
+    }),
   },
   cleanActionText: {
     fontSize: 14,
@@ -3537,11 +3702,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginHorizontal: 15,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+      web: {
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+      }
+    }),
   },
   
   // Simple student info text style

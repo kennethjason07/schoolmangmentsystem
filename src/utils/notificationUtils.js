@@ -150,7 +150,7 @@ const showPermissionSettingsAlert = (userType) => {
     
     Alert.alert(
       'Notifications Disabled',
-      `To receive important ${userTypeText} notifications, please enable notifications in your device settings.\n\nGo to Settings > Notifications > VidyaSetu and turn on notifications.`,
+      `To receive important ${userTypeText} notifications, please enable notifications in your device settings.\n\nGo to Settings > Notifications > CampusSentinel and turn on notifications.`,
       [
         {
           text: 'Cancel',

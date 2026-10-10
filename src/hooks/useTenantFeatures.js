@@ -47,7 +47,8 @@ export const useTenantFeatures = () => {
         setFeaturesLoading(true);
         setFeaturesError(null);
         
-        console.log('🔍 Loading user features for user ID:', user.id);
+        
+        // console.log('🔍 Loading user features for user ID:', user.id);
         
         const { data: userData, error: userError } = await supabase
           .from('users')
@@ -60,7 +61,7 @@ export const useTenantFeatures = () => {
         }
         
         const features = userData?.features || {};
-        console.log('✅ Loaded user features:', features);
+        // console.log('✅ Loaded user features:', features);
         setUserFeatures(features);
         
       } catch (err) {
@@ -89,13 +90,13 @@ export const useTenantFeatures = () => {
 
     // If user features are still loading, deny access for security
     if (featuresLoading || !user?.id) {
-      console.log(`🔒 useTenantFeatures: User features loading or no user, denying access to '${featureKey}'`);
+      // console.log(`🔒 useTenantFeatures: User features loading or no user, denying access to '${featureKey}'`);
       return false;
     }
     
     // If there was an error loading features, deny access
     if (featuresError) {
-      console.log(`🔒 useTenantFeatures: Features error, denying access to '${featureKey}': ${featuresError}`);
+      // console.log(`🔒 useTenantFeatures: Features error, denying access to '${featureKey}': ${featuresError}`);
       return false;
     }
 
@@ -104,14 +105,14 @@ export const useTenantFeatures = () => {
     const normalizeTrue = (v) => v === true || v === 'true' || v === 1;
     const hasFeaturesAll = normalizeTrue(userFeatures[FEATURES.FEATURES_ALL]);
     if (hasFeaturesAll && !isFeaturesAll(featureKey)) {
-      console.log(`🌟 useTenantFeatures: User has 'features-all' permission, granting access to '${featureKey}' for user ${user.email}`);
+      // console.log(`🌟 useTenantFeatures: User has 'features-all' permission, granting access to '${featureKey}' for user ${user.email}`);
       return true;
     }
 
     // Check if feature is explicitly enabled for this user
     const hasAccess = normalizeTrue(userFeatures[featureKey]);
     
-    console.log(`🔍 useTenantFeatures: Feature '${featureKey}' access: ${hasAccess ? 'GRANTED' : 'DENIED'} for user ${user.email}`);
+    // console.log(`🔍 useTenantFeatures: Feature '${featureKey}' access: ${hasAccess ? 'GRANTED' : 'DENIED'} for user ${user.email}`);
     
     return hasAccess;
   };
@@ -208,9 +209,9 @@ export const useTenantFeatures = () => {
    */
   const debugFeatureAccess = (featureKey, context = 'Unknown') => {
     if (process.env.NODE_ENV === 'development') {
-      const access = hasFeature(featureKey);
-      const userName = user?.email || 'Unknown';
-      console.log(`🔍 [${context}] Feature '${featureKey}' -> ${access ? '✅ GRANTED' : '❌ DENIED'} for user '${userName}'`);
+      // const access = hasFeature(featureKey);
+      // const userName = user?.email || 'Unknown';
+      // console.log(`🔍 [${context}] Feature '${featureKey}' -> ${access ? '✅ GRANTED' : '❌ DENIED'} for user '${userName}'`);
     }
   };
 

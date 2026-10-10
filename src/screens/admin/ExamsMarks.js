@@ -79,10 +79,8 @@ const debounce = (func, wait) => {
 };
 
 // Component load verification
-console.log('💻 EXAMS MARKS - Component loaded on platform:', Platform.OS);
-console.log('🔧 EXAMS MARKS - Enhanced marks saving functionality active');
-console.log('🔍 EXAMS MARKS - Version: Enhanced with web compatibility and detailed logging');
-console.log('🕰️ EXAMS MARKS - Load time:', new Date().toISOString());
+// Component load verification
+// Logs removed for cleanup
 
 // Helper functions for date formatting
 const formatDate = (dateString) => {

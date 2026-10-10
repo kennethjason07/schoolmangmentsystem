@@ -392,37 +392,17 @@ export default function AppNavigator() {
   const { user, userType, loading } = useAuth();
 
   // Web-specific debugging
-  if (Platform.OS === 'web') {
-    console.log('🌐 AppNavigator - Current state:', {
-      user: !!user,
-      userType,
-      loading,
-      timestamp: new Date().toISOString()
-    });
-  }
+  // Logs removed for cleanup
 
   // Show loading screen while checking authentication
   if (loading) {
-    console.log('🔄 Showing loading screen, loading state:', loading);
     return <LoadingScreen />;
   }
 
-  console.log('🎯 AppNavigator - Final navigation decision:', {
-    authenticated: !!user,
-    userType,
-    willShowAuthStack: !user,
-    willShowUserStack: !!user
-  });
+  // Logs removed for cleanup
 
   // Additional debugging for user and userType
-  if (user) {
-    console.log('👤 Authenticated user details:', {
-      id: user.id,
-      email: user.email,
-      role_id: user.role_id,
-      userType: userType
-    });
-  }
+  // Logs removed for cleanup
 
   return (
     <NavigationContainer ref={navigationRef}>

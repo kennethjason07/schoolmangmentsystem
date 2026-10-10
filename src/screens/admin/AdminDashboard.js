@@ -195,7 +195,6 @@ const AdminDashboard = ({ navigation }) => {
         }
       }
     } catch (error) {
-      console.error('Error opening study certificate URL:', error);
       Alert.alert(
         'Error',
         'Study Certificate URL not configured. Contact your service provider Maximus Consultancy Services',
@@ -240,7 +239,6 @@ const AdminDashboard = ({ navigation }) => {
         }
       }
     } catch (error) {
-      console.error('Error opening hall tickets URL:', error);
       Alert.alert(
         'Error',
         'Hall Tickets URL not configured. Contact your service provider Maximus Consultancy Services',
@@ -285,7 +283,6 @@ const AdminDashboard = ({ navigation }) => {
         }
       }
     } catch (error) {
-      console.error('Error opening marks card URL:', error);
       Alert.alert(
         'Error',
         'Marks Card URL not configured. Contact your service provider Maximus Consultancy Services',
@@ -442,7 +439,6 @@ const AdminDashboard = ({ navigation }) => {
           })
         );
       } else if (eventsRes.error && eventsRes.error.code !== '42P01') {
-        console.error('Error loading events:', eventsRes.error);
         setEvents([]);
       } else {
         setEvents([]);
@@ -461,7 +457,6 @@ const AdminDashboard = ({ navigation }) => {
           
           // Check if date is valid
           if (isNaN(date.getTime())) {
-            console.warn('Invalid date received:', dateString);
             return 'Invalid date';
           }
           
@@ -493,7 +488,6 @@ const AdminDashboard = ({ navigation }) => {
             });
           }
         } catch (error) {
-          console.error('Error formatting activity date:', error, dateString);
           return 'Unknown time';
         }
       };
@@ -535,7 +529,6 @@ const AdminDashboard = ({ navigation }) => {
       const cleanedActivities = recentActivities.slice(0, 5).map(({ rawDate, ...activity }) => activity);
       setActivities(cleanedActivities);
     } catch (error) {
-      console.error('🏠 [AdminDashboard] Error loading dashboard data:', error);
       let errorMessage = 'Failed to load dashboard data';
       let shouldRetry = false;
       if (error.message.includes('User authentication not ready')) {
@@ -577,7 +570,6 @@ const AdminDashboard = ({ navigation }) => {
         await loadDashboardData();
         await loadChartData({ reuseMonthlyFromDashboard: true });
       } catch (error) {
-        console.error('❌ [AdminDashboard] Dashboard initialization failed:', error);
       }
     };
 
@@ -623,7 +615,6 @@ const AdminDashboard = ({ navigation }) => {
       await loadDashboardData();
       await loadChartData({ reuseMonthlyFromDashboard: true });
     } catch (error) {
-      console.error('Error refreshing dashboard:', error);
     } finally {
       setRefreshing(false);
     }
@@ -696,7 +687,6 @@ const AdminDashboard = ({ navigation }) => {
         { name: 'Due', population: due, color: '#F44336', legendFontColor: '#333', legendFontSize: 14 },
       ]);
     } catch (error) {
-      console.error('Error loading chart data:', error);
     }
   };
   const chartConfig = {
@@ -743,8 +733,6 @@ const AdminDashboard = ({ navigation }) => {
   
   // Debug eventInput changes (simplified)
   useEffect(() => {
-    if (eventInput.date) {
-    }
   }, [eventInput.date]);
   const [savingEvent, setSavingEvent] = useState(false);
   const [editEventIndex, setEditEventIndex] = useState(null);
@@ -766,13 +754,10 @@ const AdminDashboard = ({ navigation }) => {
         .order('section', { ascending: true });
 
       if (error) {
-        console.error('Error loading classes:', error);
         return;
       }
-
       setAllClasses(classesData || []);
     } catch (error) {
-      console.error('Error loading classes:', error);
     } finally {
       setLoadingClasses(false);
     }
@@ -795,14 +780,11 @@ const AdminDashboard = ({ navigation }) => {
       }
       
       if (error) {
-        console.error('🔥 Error checking events table:', error);
-        console.error('🔥 Error details:', { code: error.code, message: error.message, details: error.details });
         return false;
       }
       
       return true;
     } catch (error) {
-      console.error('🔥 Error checking events table:', error);
       return false;
     }
   };
@@ -871,7 +853,6 @@ const AdminDashboard = ({ navigation }) => {
       // Verify state was set
       
     } catch (error) {
-      console.error('🔧 Error opening add event modal:', error);
       Alert.alert('Error', 'Failed to open event creation form. Please try again.');
     }
   };
@@ -959,7 +940,6 @@ const AdminDashboard = ({ navigation }) => {
         .select();
 
       if (error) {
-        console.error('🏢 Insert error:', error);
         throw new Error(`Failed to create event: ${error.message}`);
       }
       
@@ -990,8 +970,6 @@ const AdminDashboard = ({ navigation }) => {
       }
       
     } catch (error) {
-      console.error('🏢 Error saving event:', error);
-      
       const errorMsg = error.message || 'Failed to save event';
       if (Platform.OS === 'web') {
         window.alert(errorMsg);
@@ -1039,7 +1017,6 @@ const AdminDashboard = ({ navigation }) => {
         .eq('tenant_id', currentTenantId);
 
       if (error) {
-        console.error('Error deleting event:', error);
         throw new Error(`Failed to delete event: ${error.message}`);
       }
       
@@ -1060,8 +1037,6 @@ const AdminDashboard = ({ navigation }) => {
       
       
     } catch (error) {
-      console.error('❌ Error deleting event:', error);
-      
       // 🚀 FIXED: Web-compatible error message
       const errorMsg = `Could not delete "${eventItem.title}": ${error.message}`;
       if (Platform.OS === 'web') {
@@ -1168,7 +1143,6 @@ const AdminDashboard = ({ navigation }) => {
                 loadChartData()
               ]);
             } catch (error) {
-              console.error('❌ [AdminDashboard] Manual retry failed:', error);
               // Error will be set by loadDashboardData
             }
           }}>
@@ -1776,11 +1750,18 @@ const AdminDashboard = ({ navigation }) => {
                   paddingHorizontal: 24,
                   borderRadius: 8,
                   flex: 1,
-                  shadowColor: '#2196F3',
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.3,
-                  shadowRadius: 8,
-                  elevation: 4
+                  ...Platform.select({
+                    web: {
+                      boxShadow: '0 4px 8px rgba(33,150,243,0.3)',
+                    },
+                    native: {
+                      elevation: 4,
+                      shadowColor: '#2196F3',
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.3,
+                      shadowRadius: 8,
+                    }
+                  }),
                 }}
                 disabled={savingEvent}
               > 
@@ -1828,14 +1809,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+      },
+      native: {
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   quickActionIcon: {
     fontSize: 24,
@@ -1852,14 +1837,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+      },
+      native: {
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   chartTitle: {
     fontSize: 16,
@@ -1872,14 +1861,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+      },
+      native: {
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   announcementsTitle: {
     fontSize: 16,
@@ -2015,14 +2008,18 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     borderRadius: 20,
     backgroundColor: '#667eea',
-    shadowColor: '#667eea',
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 12,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 8px 16px rgba(102,126,234,0.3)',
+      },
+      native: {
+        elevation: 12,
+        shadowColor: '#667eea',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.3,
+        shadowRadius: 16,
+      }
+    }),
     position: 'relative',
     overflow: 'hidden',
   },
@@ -2165,14 +2162,18 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 6,
     paddingVertical: 2,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0,0,0,0.25)',
+      },
+      native: {
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+      }
+    }),
   },
   bannerText: {
     fontSize: 10,
@@ -2269,14 +2270,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginRight: 8,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+      },
+      native: {
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   feeSummaryTitle: {
     fontSize: 16,
@@ -2349,14 +2354,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 10,
-    shadowColor: '#2196F3',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(33,150,243,0.3)',
+      },
+      native: {
+        elevation: 4,
+        shadowColor: '#2196F3',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+      }
+    }),
     // Ensure button is visible and clickable
     zIndex: 1,
     position: 'relative',
@@ -2381,13 +2390,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 12,
     elevation: 1000,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 10px rgba(0,0,0,0.25)',
+      },
+      native: {
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.25,
+        shadowRadius: 10,
+      }
+    }),
     alignSelf: 'center',
     zIndex: 1000000,
     position: 'relative',
@@ -2405,14 +2419,18 @@ const styles = StyleSheet.create({
     maxHeight: '90%',
     backgroundColor: '#ffffff',
     borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 10,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 25,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 10px 20px rgba(0,0,0,0.3)',
+      },
+      native: {
+        elevation: 25,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.3,
+        shadowRadius: 20,
+      }
+    }),
   },
   simpleModalOverlay: {
     position: 'absolute',
@@ -2448,13 +2466,18 @@ const styles = StyleSheet.create({
     maxWidth: 450,
     maxHeight: '85%',
     elevation: 10000,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 15,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 8px 15px rgba(0,0,0,0.3)',
+      },
+      native: {
+        elevation: 1000,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.3,
+        shadowRadius: 15,
+      }
+    }),
     zIndex: 10000000,
     position: 'relative',
   },
@@ -2510,14 +2533,18 @@ const styles = StyleSheet.create({
   inputFocused: {
     borderColor: '#2196F3',
     backgroundColor: '#fff',
-    shadowColor: '#2196F3',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(33,150,243,0.1)',
+      },
+      native: {
+        elevation: 2,
+        shadowColor: '#2196F3',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   inputLabel: {
     fontSize: 16,
@@ -2549,14 +2576,18 @@ const styles = StyleSheet.create({
   },
   modalButtonPrimary: {
     backgroundColor: '#2196F3',
-    shadowColor: '#2196F3',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 8px rgba(33,150,243,0.3)',
+      },
+      native: {
+        elevation: 4,
+        shadowColor: '#2196F3',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      }
+    }),
   },
   modalButtonText: {
     fontSize: 16,

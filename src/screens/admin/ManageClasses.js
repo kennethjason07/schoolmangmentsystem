@@ -34,14 +34,7 @@ const ManageClasses = ({ navigation }) => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   
-  // 🏢 LOG: Component initialization with optimized logging
-  console.log('🏢 ManageClasses: Component initialized with email-based tenant system');
-  console.log('🏢 ManageClasses: Initial context:', {
-    tenantId: tenantId || 'NULL',
-    tenantName: tenant?.name || 'NULL',
-    userEmail: user?.email || 'NULL',
-    tenantLoading
-  });
+  // Component initialization
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [sections, setSections] = useState(['A', 'B', 'C', 'D']);
@@ -87,38 +80,16 @@ const ManageClasses = ({ navigation }) => {
 
   // 🚀 Enhanced tenant context loading
   useEffect(() => {
-    console.log('🔄 ManageClasses: Enhanced tenant context changed');
-    console.log('📍 ManageClasses: Enhanced tenant status:', {
-      isReady,
-      tenantLoading,
-      tenantId: tenantId || 'null',
-      tenantName: tenantName || 'null',
-      userId: user?.id || 'null',
-      hasError: !!tenantError
-    });
-    
     // Only load data when tenant is ready
     if (isReady && user) {
-      console.log('🚀 ManageClasses: Tenant ready, loading data...');
       loadAllData();
     } else if (tenantError) {
-      console.error('❌ ManageClasses: Tenant error detected:', tenantError);
       setError(tenantError);
-    } else {
-      console.log('⏳ ManageClasses: Waiting for tenant to be ready...', {
-        isReady,
-        hasUser: !!user,
-        tenantLoading
-      });
     }
   }, [isReady, user, tenantError]);
 
-  // Debug modal state changes
+  // Debug modal state changes (simplified)
   useEffect(() => {
-    console.log('🔧 ManageClasses: Class details modal state changed:', classDetailsModal);
-    if (classDetailsModal && selectedClassDetails) {
-      console.log('🔧 ManageClasses: Selected class details:', selectedClassDetails.class_name);
-    }
   }, [classDetailsModal, selectedClassDetails]);
 
   const loadAllData = async () => {
@@ -127,13 +98,11 @@ const ManageClasses = ({ navigation }) => {
     
     // 🚀 Add timeout to prevent infinite loading
     const timeoutId = setTimeout(() => {
-      console.error('❌ ManageClasses: Loading timeout (10s)');
       setError('Loading timeout. Please check your internet connection.');
       setLoading(false);
     }, 10000);
     
     try {
-      console.log('🏢 ManageClasses: Starting enhanced tenant data loading...');
       
       // 🛡️ Enhanced tenant validation
       const validation = validateTenantAccessLocal();
@@ -142,11 +111,9 @@ const ManageClasses = ({ navigation }) => {
       }
       
       // Fetch teachers once (narrow projection)
-      console.log('🏢 ManageClasses: Fetching teachers...');
       const teachersResult = await tenantDatabase.read(TABLES.TEACHERS, {}, 'id, name');
       const { data: teacherData, error: teacherError } = teachersResult;
       if (teacherError) {
-        console.error('❌ ManageClasses: Teachers query failed:', teacherError.message);
         throw new Error(`Failed to load teachers: ${teacherError.message}`);
       }
       setTeachers(teacherData || []);
@@ -157,29 +124,10 @@ const ManageClasses = ({ navigation }) => {
       setHasMore(true);
       await loadClassesPage(0, true);
       
-      console.log('📊 ManageClasses: Data loaded successfully:', {
-        classes: (Array.isArray(classes) ? classes.length : 0),
-        teachers: teacherData?.length || 0,
-        tenantId
-      });
-      
-      // 📊 Performance monitoring
-      const endTime = performance.now();
-      const loadTime = Math.round(endTime - startTime);
-      console.log(`✅ ManageClasses: Data loaded in ${loadTime}ms`);
-      
-      if (loadTime > 2000) {
-        console.warn('⚠️ ManageClasses: Slow loading (>2s). Check network.');
-      } else {
-        console.log('🚀 ManageClasses: Fast loading achieved!');
-      }
-      
     } catch (error) {
-      clearTimeout(timeoutId);
-      console.error('❌ ManageClasses: Failed to load data:', error.message);
+      setError(error.message || 'Failed to load classes and teachers');
       Alert.alert('Error', error.message || 'Failed to load classes and teachers');
     } finally {
-      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
@@ -216,8 +164,8 @@ const ManageClasses = ({ navigation }) => {
           supabase.from(TABLES.SUBJECTS).select('id, class_id').eq('tenant_id', cachedTenantId).in('class_id', classIds),
         ]);
 
-        if (studentsRes.error) console.warn('Warning: Student count query failed:', studentsRes.error.message);
-        if (subjectsRes.error) console.warn('Warning: Subject count query failed:', subjectsRes.error.message);
+        if (studentsRes.error) {}
+        if (subjectsRes.error) {}
 
         const students = studentsRes.data || [];
         const subjects = subjectsRes.data || [];
@@ -266,16 +214,7 @@ const ManageClasses = ({ navigation }) => {
         return;
       }
 
-      console.log('🏠 ManageClasses: Creating new class with enhanced tenant system');
-      console.log('📋 ManageClasses: Class data for insert:', {
-        class_name: newClass.class_name,
-        academic_year: newClass.academic_year,
-        section: newClass.section,
-        class_teacher_id: newClass.class_teacher_id || null
-      });
-      
       // First, check if a class with the same name, section, and academic year already exists using enhanced helpers
-      console.log('🔍 ManageClasses: Checking for existing class using enhanced tenant system');
       const { data: existingClass, error: checkError } = await tenantDatabase.read(
         TABLES.CLASSES,
         {
@@ -287,18 +226,14 @@ const ManageClasses = ({ navigation }) => {
       );
       
       if (checkError) {
-        console.error('❌ ManageClasses: Error checking for existing class:', checkError);
         throw checkError;
       }
       
       if (existingClass && existingClass.length > 0) {
-        console.log('⚠️ ManageClasses: Duplicate class found:', existingClass[0]);
         const errorMessage = `A class "${newClass.class_name}${newClass.section}" already exists for academic year "${newClass.academic_year}" in your school. Please choose a different class name, section, or academic year.`;
         Alert.alert('Duplicate Class', errorMessage);
         return; // Don't proceed with insert
       }
-      
-      console.log('✅ ManageClasses: No duplicate found, proceeding with enhanced insert');
       
       // Insert a new class using enhanced tenant database helpers
       const { data: insertedData, error } = await tenantDatabase.create(TABLES.CLASSES, {
@@ -309,8 +244,6 @@ const ManageClasses = ({ navigation }) => {
       });
 
       if (error) {
-        console.error('❌ ManageClasses: Database error adding class:', error);
-        
         // Handle specific constraint violations with user-friendly messages
         if (error.code === '23505' && error.message.includes('unique_class_section_year')) {
           const errorMessage = `A class "${newClass.class_name}${newClass.section}" already exists for academic year "${newClass.academic_year}". Please choose a different class name, section, or academic year.`;
@@ -321,20 +254,10 @@ const ManageClasses = ({ navigation }) => {
         throw error;
       }
       
-      console.log('✅ ManageClasses: Class created successfully with enhanced tenant system!');
-      console.log('📋 ManageClasses: Inserted class details:');
       if (insertedData && insertedData.length > 0) {
-        insertedData.forEach((cls, index) => {
-          console.log(`   [${index + 1}] New Class: ${cls.class_name} | tenant_id: ${cls.tenant_id} | id: ${cls.id}`);
-          
-          // Verify the inserted class has the correct tenant_id (auto-injected by tenantDatabase)
+        insertedData.forEach((cls) => {
           const cachedTenantId = getCachedTenantId();
-          if (cls.tenant_id === cachedTenantId) {
-            console.log('✅ ManageClasses: New class has correct tenant_id (auto-injected)');
-          } else {
-            console.error('❌ ManageClasses: NEW CLASS TENANT MISMATCH!');
-            console.error('❌ Expected tenant_id:', cachedTenantId);
-            console.error('❌ Actual tenant_id:', cls.tenant_id);
+          if (cls.tenant_id !== cachedTenantId) {
           }
         });
       }
@@ -350,7 +273,6 @@ const ManageClasses = ({ navigation }) => {
       setIsAddModalVisible(false);
       Alert.alert('Success', 'Class added successfully!');
     } catch (error) {
-      console.error('Error adding class:', error);
       Alert.alert('Error', `Failed to add class: ${error.message}`);
     }
   };
@@ -370,7 +292,6 @@ const ManageClasses = ({ navigation }) => {
       }
 
       // First, check if another class with the same name, section, and academic year already exists using enhanced helpers
-      console.log('🔍 ManageClasses: Checking for existing class in tenant (edit) using enhanced system');
       const { data: allExistingClasses, error: checkError } = await tenantDatabase.read(
         TABLES.CLASSES,
         {
@@ -385,18 +306,14 @@ const ManageClasses = ({ navigation }) => {
       const existingClass = allExistingClasses?.filter(cls => cls.id !== selectedClass.id) || [];
       
       if (checkError) {
-        console.error('❌ ManageClasses: Error checking for existing class during edit:', checkError);
         throw checkError;
       }
       
       if (existingClass && existingClass.length > 0) {
-        console.log('⚠️ ManageClasses: Duplicate class found during edit:', existingClass[0]);
         const errorMessage = `A class "${selectedClass.class_name}${selectedClass.section}" already exists for academic year "${selectedClass.academic_year}" in your school. Please choose a different class name, section, or academic year.`;
         Alert.alert('Duplicate Class', errorMessage);
         return; // Don't proceed with update
       }
-      
-      console.log('✅ ManageClasses: No duplicate found during edit, proceeding with enhanced update');
 
       // Update a class using enhanced tenant database helpers
       const { error } = await tenantDatabase.update(TABLES.CLASSES, selectedClass.id, {
@@ -407,7 +324,6 @@ const ManageClasses = ({ navigation }) => {
       });
 
       if (error) {
-        console.error('Database error updating class:', error);
         
         // Handle specific constraint violations with user-friendly messages
         if (error.code === '23505' && error.message.includes('unique_class_section_year')) {
@@ -425,7 +341,6 @@ const ManageClasses = ({ navigation }) => {
       setSelectedClass(null);
       Alert.alert('Success', 'Class updated successfully!');
     } catch (error) {
-      console.error('Error updating class:', error);
       Alert.alert('Error', `Failed to update class: ${error.message}`);
     }
   };
@@ -446,7 +361,6 @@ const ManageClasses = ({ navigation }) => {
         });
     
     if (!confirmDelete) {
-      console.log('❌ User cancelled class deletion');
       return;
     }
     
@@ -466,13 +380,7 @@ const ManageClasses = ({ navigation }) => {
         return;
       }
       
-      console.log(`🗑️ Starting deletion process for class: ${classItem.class_name} (ID: ${classItem.id})`);
-      console.log('🏢 Using enhanced tenant system for deletion');
-
-      // 🚀 FIXED: Use consistent tenantDatabase helpers throughout (like teacher screen)
-      
       // Step 1: Get all subjects for this class to handle cascading deletes
-      console.log('1. Finding subjects for this class...');
       const { data: classSubjects, error: subjectsQueryError } = await tenantDatabase.read(
         TABLES.SUBJECTS,
         { class_id: classItem.id },
@@ -480,59 +388,43 @@ const ManageClasses = ({ navigation }) => {
       );
       
       if (subjectsQueryError) {
-        console.error('Error querying subjects:', subjectsQueryError);
         throw new Error(`Failed to query subjects: ${subjectsQueryError.message}`);
       }
       
       const subjectIds = classSubjects?.map(s => s.id) || [];
-      console.log('✓ Found subjects to delete:', subjectIds.length);
 
       // Step 2: Delete teacher_subjects assignments for these subjects
       if (subjectIds.length > 0) {
-        console.log('2. Deleting teacher-subject assignments...');
         const { error: teacherSubjectsError } = await tenantDatabase.delete(
           'teacher_subjects',
           { subject_id: { in: subjectIds } }
         );
         if (teacherSubjectsError) {
-          console.error('Error deleting teacher_subjects:', teacherSubjectsError);
           throw new Error(`Failed to delete teacher assignments: ${teacherSubjectsError.message}`);
         }
-        console.log('✓ Deleted teacher-subject assignments');
       }
 
       // Step 3: Delete marks related to subjects in this class
       if (subjectIds.length > 0) {
-        console.log('3. Deleting marks...');
         const { error: marksError } = await tenantDatabase.delete(
           'marks',
           { subject_id: { in: subjectIds } }
         );
         if (marksError && !marksError.message.includes('does not exist')) {
-          console.error('Error deleting marks:', marksError);
           throw new Error(`Failed to delete marks: ${marksError.message}`);
         }
-        console.log('✓ Deleted marks');
       }
 
       // Step 4: Delete timetable entries for this class
-      console.log('4. Deleting timetable entries...');
       try {
-        const { error: timetableError } = await tenantDatabase.delete(
+        await tenantDatabase.delete(
           'timetable_entries',
           { class_id: classItem.id }
         );
-        if (timetableError && !timetableError.message.includes('does not exist')) {
-          console.warn('Error deleting timetable entries:', timetableError);
-        } else {
-          console.log('✓ Deleted timetable entries');
-        }
       } catch (timetableErr) {
-        console.log('ℹ Timetable entries table not found, skipping...');
       }
 
       // Step 5: Delete assignments and their submissions
-      console.log('5. Finding and deleting assignments...');
       const { data: classAssignments } = await tenantDatabase.read(
         'assignments',
         { class_id: classItem.id },
@@ -542,13 +434,10 @@ const ManageClasses = ({ navigation }) => {
       const assignmentIds = classAssignments?.map(a => a.id) || [];
       if (assignmentIds.length > 0) {
         // Delete assignment submissions first
-        const { error: submissionsError } = await tenantDatabase.delete(
+        await tenantDatabase.delete(
           'assignment_submissions',
           { assignment_id: { in: assignmentIds } }
         );
-        if (submissionsError && !submissionsError.message.includes('does not exist')) {
-          console.warn('Error deleting assignment submissions:', submissionsError);
-        }
         
         // Then delete assignments
         const { error: assignmentsError } = await tenantDatabase.delete(
@@ -556,118 +445,56 @@ const ManageClasses = ({ navigation }) => {
           { class_id: classItem.id }
         );
         if (assignmentsError) {
-          console.error('Error deleting assignments:', assignmentsError);
           throw new Error(`Failed to delete assignments: ${assignmentsError.message}`);
         }
       }
-      console.log('✓ Deleted assignments and submissions');
 
       // Step 6: Delete other related data
-      console.log('6. Deleting other related data...');
-      
-      // Delete homeworks
       try {
-        const { error: homeworksError } = await tenantDatabase.delete(
-          'homeworks',
-          { class_id: classItem.id }
-        );
-        if (homeworksError && !homeworksError.message.includes('does not exist')) {
-          console.warn('Error deleting homeworks:', homeworksError);
-        } else {
-          console.log('✓ Deleted homeworks');
-        }
-      } catch (homeworkErr) {
-        console.log('ℹ Homeworks table not found, skipping...');
-      }
+        await tenantDatabase.delete('homeworks', { class_id: classItem.id });
+      } catch (e) {}
 
-      // Delete exams
       try {
-        const { error: examsError } = await tenantDatabase.delete(
-          'exams',
-          { class_id: classItem.id }
-        );
-        if (examsError && !examsError.message.includes('does not exist')) {
-          console.warn('Error deleting exams:', examsError);
-        } else {
-          console.log('✓ Deleted exams');
-        }
-      } catch (examErr) {
-        console.log('ℹ Exams table not found, skipping...');
-      }
+        await tenantDatabase.delete('exams', { class_id: classItem.id });
+      } catch (e) {}
 
-      // Delete fee structures
       try {
-        const { error: feeStructureError } = await tenantDatabase.delete(
-          'fee_structure',
-          { class_id: classItem.id }
-        );
-        if (feeStructureError && !feeStructureError.message.includes('does not exist')) {
-          console.warn('Error deleting fee structures:', feeStructureError);
-        } else {
-          console.log('✓ Deleted fee structures');
-        }
-      } catch (feeErr) {
-        console.log('ℹ Fee structure table not found, skipping...');
-      }
+        await tenantDatabase.delete('fee_structure', { class_id: classItem.id });
+      } catch (e) {}
 
-      // Delete attendance records
       try {
-        const { error: attendanceError } = await tenantDatabase.delete(
-          'student_attendance',
-          { class_id: classItem.id }
-        );
-        if (attendanceError && !attendanceError.message.includes('does not exist')) {
-          console.warn('Error deleting student attendance:', attendanceError);
-        } else {
-          console.log('✓ Deleted student attendance');
-        }
-      } catch (attendanceErr) {
-        console.log('ℹ Student attendance table not found, skipping...');
-      }
+        await tenantDatabase.delete('student_attendance', { class_id: classItem.id });
+      } catch (e) {}
 
       // Step 7: Update students to remove class assignment
-      console.log('7. Updating students to remove class assignment...');
-      const { error: updateError } = await tenantDatabase.update(
+      await tenantDatabase.update(
         'students',
         { class_id: classItem.id },
         { class_id: null }
       );
-      if (updateError) {
-        console.warn('Error updating students:', updateError);
-        // Don't throw error for this, as it's not critical
-      } else {
-        console.log('✓ Updated students to remove class assignment');
-      }
 
       // Step 8: Delete subjects for this class
-      console.log('8. Deleting subjects...');
       const { error: subjectsError } = await tenantDatabase.delete(
         TABLES.SUBJECTS,
         { class_id: classItem.id }
       );
       if (subjectsError) {
-        console.error('Error deleting subjects:', subjectsError);
         throw new Error(`Failed to delete subjects: ${subjectsError.message}`);
       }
-      console.log('✓ Deleted subjects');
 
       // Step 9: Finally, delete the class itself
-      console.log('9. Deleting class record...');
       const { error: classDeleteError } = await tenantDatabase.delete(
         TABLES.CLASSES,
         classItem.id  // Use the ID directly for single record deletion
       );
+      
       if (classDeleteError) {
-        console.error('Error deleting class:', classDeleteError);
-        throw new Error(`Failed to delete class: ${classDeleteError.message}`);
+        throw new Error(`Failed to delete class record: ${classDeleteError.message}`);
       }
-      console.log('✓ Deleted class record');
-
-      // 🚀 FIXED: Update local state with proper React state management
+      
+      // Update local state with proper React state management
       setClasses(prevClasses => {
-        const updatedClasses = prevClasses.filter(c => c.id !== classItem.id);
-        console.log(`🔄 Updated local state: removed class ${classItem.class_name}, remaining: ${updatedClasses.length}`);
-        return updatedClasses;
+        return prevClasses.filter(c => c.id !== classItem.id);
       });
       
       // 🚀 FIXED: Web-compatible success message
@@ -678,11 +505,7 @@ const ManageClasses = ({ navigation }) => {
         Alert.alert('Success', successMsg);
       }
       
-      console.log(`✅ Class deletion completed successfully: ${classItem.class_name}`);
-      
     } catch (error) {
-      console.error('❌ Error deleting class:', error);
-      
       // 🚀 FIXED: Web-compatible error message
       const errorMsg = `Could not delete "${classItem.class_name}": ${error.message}\n\nPlease check if this class has dependencies that need to be removed first.`;
       if (Platform.OS === 'web') {
@@ -706,8 +529,6 @@ const ManageClasses = ({ navigation }) => {
   };
 
   const openClassDetails = async (classItem) => {
-    console.log('🔧 ManageClasses: Opening class details for:', classItem.class_name);
-    
     try {
       setSelectedClassDetails(classItem);
       
@@ -719,8 +540,6 @@ const ManageClasses = ({ navigation }) => {
       }
       
       // Fetch subjects for this class with their assigned teachers using manual query (complex join)
-      console.log('📋 ManageClasses: Fetching subjects for class ID using enhanced system:', classItem.id);
-      
       const cachedTenantId = getCachedTenantId();
       const { data: subjectsData, error: subjectsError } = await supabase
         .from(TABLES.SUBJECTS)
@@ -739,11 +558,8 @@ const ManageClasses = ({ navigation }) => {
         .eq('tenant_id', cachedTenantId);
       
       if (subjectsError) {
-        console.error('Error fetching subjects:', subjectsError);
         throw subjectsError;
       }
-      
-      console.log('📋 ManageClasses: Subjects data loaded:', subjectsData?.length || 0, 'subjects');
       
       // Process the data to get teacher info for each subject
       const processedSubjects = subjectsData?.map(subject => ({
@@ -751,12 +567,9 @@ const ManageClasses = ({ navigation }) => {
         teacher: subject.teacher_subjects?.[0]?.teachers || null
       })) || [];
       
-      console.log('🔧 ManageClasses: Setting class subjects and showing modal');
       setClassSubjects(processedSubjects);
       setClassDetailsModal(true);
-      
     } catch (error) {
-      console.error('Error loading class details:', error);
       Alert.alert('Error', 'Failed to load class details');
     }
   };
@@ -794,7 +607,6 @@ const ManageClasses = ({ navigation }) => {
           Platform.OS === 'web' && styles.webClickable
         ]}
         onPress={() => {
-          console.log('🔧 ManageClasses: Class card pressed:', item.class_name);
           openClassDetails(item);
         }}
         activeOpacity={0.7}
@@ -855,7 +667,6 @@ const ManageClasses = ({ navigation }) => {
             onPress={(e) => {
               if (e && e.stopPropagation) e.stopPropagation();
               if (e && e.preventDefault) e.preventDefault();
-              console.log('🔄 Delete button clicked for class:', item.class_name);
               handleDeleteClass(item);
             }}
             activeOpacity={0.7}
@@ -989,15 +800,12 @@ const ManageClasses = ({ navigation }) => {
 
   // Add class details modal
   const renderClassDetailsModal = () => {
-    console.log('🔧 ManageClasses: Rendering class details modal. Visible:', classDetailsModal);
-    
     return (
       <Modal
         visible={classDetailsModal}
         animationType="slide"
         transparent={false}
         onRequestClose={() => {
-          console.log('🔧 ManageClasses: Closing class details modal');
           setClassDetailsModal(false);
         }}
       >
@@ -1219,11 +1027,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      native: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+      }
+    }),
   },
   classHeader: {
     flexDirection: 'row',
@@ -1326,15 +1141,19 @@ const styles = StyleSheet.create({
     maxHeight: '90%',
     minHeight: 400,
     overflow: 'hidden',
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    minHeight: 400,
+    overflow: 'hidden',
     ...Platform.select({
       web: {
         boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
       },
+      native: {
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      }
     }),
   },
   modalHeader: {

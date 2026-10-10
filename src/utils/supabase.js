@@ -14,10 +14,8 @@ const customStorageAdapter = {
         // Use window.localStorage directly on web for better compatibility
         if (typeof window !== 'undefined' && window.localStorage) {
           const value = window.localStorage.getItem(key);
-          console.log(`📦 [Storage] GET ${key}:`, value ? 'Found' : 'Not found');
           return value ?? null;
         }
-        console.warn('📦 [Storage] localStorage not available');
         return null;
       }
       return AsyncStorage.getItem(key);
@@ -32,14 +30,6 @@ const customStorageAdapter = {
         // Use window.localStorage directly on web for better compatibility
         if (typeof window !== 'undefined' && window.localStorage) {
           window.localStorage.setItem(key, value);
-          console.log(`📦 [Storage] SET ${key}:`, 'Stored successfully');
-          
-          // Verify storage worked
-          const stored = window.localStorage.getItem(key);
-          if (!stored) {
-            console.error(`📦 [Storage] VERIFICATION FAILED for ${key} - value not stored`);
-          }
-          
           return Promise.resolve();
         }
         console.warn('📦 [Storage] localStorage not available for setItem');
@@ -94,39 +84,25 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   // Add fetch options for better web compatibility
   ...(Platform.OS === 'web' && {
     fetch: (url, options = {}) => {
-      console.log('🌐 [Supabase] Web fetch request:', { url: url.replace(supabaseUrl, '[SUPABASE_URL]') });
+      // console.log('🌐 [Supabase] Web fetch request:', { url: url.replace(supabaseUrl, '[SUPABASE_URL]') });
       
       return fetch(url, {
         ...options,
-        // Add CORS headers
-        headers: {
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
+        // Let Supabase handle headers naturally to avoid CORS/preflight issues
         // Set timeout for web requests (with fallback for older browsers)
         signal: (() => {
           try {
-            // Modern browsers support AbortSignal.timeout
             if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
-              return AbortSignal.timeout(30000); // 30 second timeout
+              return AbortSignal.timeout(60000); 
             }
-          } catch (error) {
-            console.warn('AbortSignal.timeout not supported, using manual controller');
-          }
-          // Fallback for older browsers
+          } catch (error) {}
           const controller = new AbortController();
-          setTimeout(() => controller.abort(), 30000);
+          setTimeout(() => controller.abort(), 60000);
           return controller.signal;
         })()
       }).catch(error => {
-        console.error('🌐 [Supabase] Web fetch error:', error);
-        
-        // Provide more specific error information
         if (error.name === 'AbortError') {
           throw new Error('Request timed out. Please check your internet connection.');
-        }
-        if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-          throw new Error('Network error. Please check your internet connection and firewall settings.');
         }
         throw error;
       });
@@ -175,11 +151,9 @@ export const tenantHelpers = {
       }
       
       if (!userRecord.tenant_id) {
-        console.warn('🏢 tenantHelpers: User record exists but no tenant_id assigned:', user.email);
         return null;
       }
       
-      console.log('🏢 tenantHelpers: ✅ Found tenant ID via email:', userRecord.tenant_id);
       return userRecord.tenant_id;
       
     } catch (error) {
@@ -201,13 +175,10 @@ export const tenantHelpers = {
       try {
         const { error } = await supabase.rpc('set_tenant_context', { tenant_id: tenantId });
         if (error) {
-          console.warn('⚠️ RPC set_tenant_context failed:', error.message);
-          console.log('📍 Continuing with client-side tenant filtering for tenant:', tenantId);
-          // Still return success since the app can work with client-side tenant filtering
+          // RPC set_tenant_context failed, app will fallback to client-side filtering
           return { success: true, clientSideOnly: true };
         }
         
-        console.log('✅ Successfully set tenant context via RPC for tenant:', tenantId);
         return { success: true };
       } catch (rpcError) {
         // If the RPC function doesn't exist or there's a configuration parameter error

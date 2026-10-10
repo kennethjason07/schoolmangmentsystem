@@ -54,7 +54,7 @@ export const useParentAuth = () => {
         // Check if user is a parent with timeout
         const parentCheckPromise = isUserParent(user.id);
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Parent check timeout')), 10000)
+          setTimeout(() => reject(new Error('Parent check timeout')), 30000)
         );
         
         const parentCheck = await Promise.race([parentCheckPromise, timeoutPromise]);
@@ -67,7 +67,7 @@ export const useParentAuth = () => {
           // Get the parent's students with timeout
           const studentsPromise = getParentStudents(user.id);
           const studentsTimeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Students fetch timeout')), 15000)
+            setTimeout(() => reject(new Error('Students fetch timeout')), 45000)
           );
           
           const studentsResult = await Promise.race([studentsPromise, studentsTimeoutPromise]);

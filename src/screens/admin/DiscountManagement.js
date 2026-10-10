@@ -22,10 +22,8 @@ import { useTenant } from '../../contexts/TenantContext';
 import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 // Component load verification
-console.log('💻 DISCOUNT MANAGEMENT - Component loaded on platform:', Platform.OS);
-console.log('🔧 DISCOUNT MANAGEMENT - Enhanced delete functionality active');
-console.log('🔍 DISCOUNT MANAGEMENT - Version: Enhanced with optimistic updates and detailed logging');
-console.log('🕰️ DISCOUNT MANAGEMENT - Load time:', new Date().toISOString());
+// Component load verification
+// Logs removed for cleanup
 
 const DiscountManagement = ({ navigation, route }) => {
   // Get navigation parameters

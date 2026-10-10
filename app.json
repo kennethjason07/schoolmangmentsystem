@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "VidyaSetu - School Management",
-    "slug": "vidyasetu",
-    "version": "1.0.0",
+    "name": "CampusSentinel - School Management",
+    "slug": "campussentinel",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -15,11 +15,11 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.vidyasetu.app"
+      "bundleIdentifier": "com.campussentinel.app"
     },
     "android": {
-      "package": "com.vidyasetu.app",
-      "versionCode": 2,
+      "package": "com.campussentinel.app",
+      "versionCode": 3,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -73,17 +73,17 @@
           "color": "#2196F3",
           "defaultChannel": "default",
           "sounds": [
-            "./sounds/vidya_setu_message.mp3",
-            "./sounds/vidya_setu_notification.mp3"
+            "./sounds/campus_sentinel_message.mp3",
+            "./sounds/campus_sentinel_notification.mp3"
           ]
         }
       ]
     ],
     "extra": {
       "eas": {
-        "projectId": "6e456e6b-bd20-4607-8440-637c75b1c864"
+        "projectId": "3ae3272b-d679-4976-aa73-b79d98315b85"
       }
     },
-    "owner": "abhishek078622"
+    "owner": "nikhil850723"
   }
 }

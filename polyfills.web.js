@@ -22,4 +22,4 @@ if (typeof global.atob === 'undefined') {
   global.atob = decode;
 }
 
-console.log('✅ Optimized polyfills loaded');
+// Log removed

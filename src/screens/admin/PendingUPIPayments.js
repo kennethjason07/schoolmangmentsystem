@@ -66,7 +66,7 @@ const PendingUPIPayments = () => {
       setLoading(true);
       
       // Use email-based tenant system - let the service handle tenant lookup
-      console.log('🏢 PendingUPIPayments - Loading payments with email-based tenant system');
+      // Use email-based tenant system - let the service handle tenant lookup
       
       const rawPayments = await UPIDBService.getPendingPaymentConfirmations(tenantId);
       
@@ -89,7 +89,7 @@ const PendingUPIPayments = () => {
         academicYear: payment.academic_year
       }));
       
-      console.log(`✅ Loaded ${transformedPayments.length} pending payments`);
+
       setPendingPayments(transformedPayments);
     } catch (error) {
       console.error('Error loading pending payments:', error);
@@ -263,16 +263,7 @@ const PendingUPIPayments = () => {
 
   // Filter payments based on status and search
   const filteredPayments = pendingPayments.filter(payment => {
-    // Debug: Log status comparison
-    if (filterStatus !== 'ALL') {
-      console.log('🔍 Filtering:', { 
-        filterStatus, 
-        paymentStatus: payment.status, 
-        matches: payment.status === filterStatus,
-        paymentId: payment.id,
-        studentName: payment.studentName
-      });
-    }
+
     
     const matchesStatus = filterStatus === 'ALL' || payment.status === filterStatus;
     const matchesSearch = !searchQuery || 
@@ -283,14 +274,7 @@ const PendingUPIPayments = () => {
     return matchesStatus && matchesSearch;
   });
   
-  // Debug: Log filtering results
-  console.log('📊 Filter Results:', {
-    filterStatus,
-    searchQuery,
-    totalPayments: pendingPayments.length,
-    filteredCount: filteredPayments.length,
-    uniqueStatuses: [...new Set(pendingPayments.map(p => p.status))]
-  });
+
 
   const renderPaymentItem = ({ item }) => (
     <View style={styles.paymentCard}>
@@ -793,10 +777,18 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
     elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    elevation: 2,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 2px 4px rgba(0,0,0,0.1)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+    }),
   },
   paymentHeader: {
     flexDirection: 'row',
@@ -915,11 +907,18 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 500,
     maxHeight: '90%',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.25)',
+      },
+      native: {
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.25,
+        shadowRadius: 8,
+      }
+    }),
   },
   modalHeader: {
     flexDirection: 'row',

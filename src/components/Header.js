@@ -174,11 +174,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
     borderBottomWidth: 1,
     borderBottomColor: '#dee2e6',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+      },
+      android: {
+        elevation: 1,
+      },
+      web: {
+        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+      }
+    }),
     paddingTop: Platform.OS === 'android' ? 48 : 24,
   },
   leftSection: {
@@ -237,11 +246,20 @@ const styles = StyleSheet.create({
     zIndex: 1,
     borderWidth: 2,
     borderColor: '#fff',
-    elevation: 3,
-    shadowColor: '#ff4757',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#ff4757',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 3,
+      },
+      web: {
+        boxShadow: '0 2px 4px rgba(255,71,87,0.3)',
+      }
+    }),
   },
   notificationBadgeText: {
     color: 'white',

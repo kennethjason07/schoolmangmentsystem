@@ -901,11 +901,18 @@ const styles = StyleSheet.create({
     margin: 16,
     borderRadius: 20,
     padding: 24,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 2px 12px rgba(0, 0, 0, 0.1)',
+      },
+      native: {
+        elevation: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+      }
+    }),
     alignItems: 'center',
   },
   avatarContainer: {
@@ -919,11 +926,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#2196F3',
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 3,
-    shadowColor: '#2196F3',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 2px 8px rgba(33, 150, 243, 0.3)',
+      },
+      native: {
+        elevation: 3,
+        shadowColor: '#2196F3',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      }
+    }),
   },
   onlineIndicator: {
     position: 'absolute',
@@ -1011,11 +1025,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 16,
     marginBottom: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.08)',
+      },
+      native: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+      }
+    }),
     overflow: 'hidden',
   },
   cardHeader: {
@@ -1166,19 +1187,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 2,
-    shadowColor: '#2196F3',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 2px 8px rgba(33, 150, 243, 0.2)',
+      },
+      native: {
+        elevation: 2,
+        shadowColor: '#2196F3',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+      }
+    }),
   },
   secondaryButton: {
     backgroundColor: '#fff',
     borderWidth: 2,
     borderColor: '#2196F3',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 1px 4px rgba(0, 0, 0, 0.1)',
+      },
+      native: {
+        elevation: 1,
+        shadowColor: '#000',
+        shadowOpacity: 0.1,
+      }
+    }),
   },
   actionButtonText: {
     fontSize: 16,
@@ -1201,11 +1236,18 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     width: '95%',
     maxHeight: '90%',
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 5px 10px rgba(0, 0, 0, 0.3)',
+      },
+      native: {
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 5 },
+        shadowOpacity: 0.3,
+        shadowRadius: 10,
+      }
+    }),
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1404,11 +1446,18 @@ const styles = StyleSheet.create({
     marginLeft: 12,
     flexDirection: 'row',
     justifyContent: 'center',
-    elevation: 3,
-    shadowColor: '#4CAF50',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 2px 4px rgba(76, 175, 80, 0.3)',
+      },
+      native: {
+        elevation: 3,
+        shadowColor: '#4CAF50',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+      }
+    }),
   },
   saveButtonDisabled: {
     backgroundColor: '#cccccc',
@@ -1433,11 +1482,18 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     padding: 16,
     borderRadius: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      native: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   quickNavTitle: {
     fontSize: 16,
@@ -1481,11 +1537,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#2196F3',
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
+      },
+      native: {
+        elevation: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      }
+    }),
   },
   
   // Bottom spacing for better scroll experience
@@ -1507,11 +1570,18 @@ const modalStyles = StyleSheet.create({
     borderRadius: 16,
     width: '90%',
     maxHeight: '80%',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
+      },
+      native: {
+        elevation: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      }
+    }),
   },
   header: {
     flexDirection: 'row',

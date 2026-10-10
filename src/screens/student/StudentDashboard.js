@@ -1769,6 +1769,9 @@ const styles = StyleSheet.create({
       android: {
         elevation: 4,
       },
+      web: {
+        boxShadow: '0 2px 4px rgba(0,0,0,0.25)',
+      }
     }),
   },
   retryButtonText: {
@@ -1784,11 +1787,20 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 16,
     borderRadius: 16,
-    elevation: 4,
-    shadowColor: '#1976d2',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#1976d2',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 4,
+      },
+      web: {
+        boxShadow: '0 4px 8px rgba(25,118,210,0.3)',
+      }
+    }),
   },
   welcomeText: {
     fontSize: 24,
@@ -1807,11 +1819,20 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     borderRadius: 20,
     backgroundColor: '#667eea',
-    shadowColor: '#667eea',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 12,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#667eea',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.3,
+        shadowRadius: 16,
+      },
+      android: {
+        elevation: 12,
+      },
+      web: {
+        boxShadow: '0 8px 16px rgba(102,126,234,0.3)',
+      }
+    }),
     position: 'relative',
     overflow: 'hidden',
   },
@@ -1913,12 +1934,9 @@ const styles = StyleSheet.create({
       android: {
         elevation: 3,
       },
-      default: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 4,
-      },
+      web: {
+        boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
+      }
     }),
   },
   studentCardRow: {
@@ -1984,12 +2002,9 @@ const styles = StyleSheet.create({
       android: {
         elevation: 2,
       },
-      default: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 4,
-      },
+      web: {
+        boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+      }
     }),
   },
   sectionTitleContainer: {
@@ -2265,10 +2280,20 @@ const styles = StyleSheet.create({
     maxHeight: '80%',
     width: '90%',
     elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 5,
+      },
+      web: {
+        boxShadow: '0 2px 4px rgba(0,0,0,0.25)',
+      }
+    }),
   },
   modalHeader: {
     flexDirection: 'row',
@@ -2318,11 +2343,18 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 8,
     marginBottom: 8,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      native: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
     paddingVertical: 8,
   },
   quickNavContent: {

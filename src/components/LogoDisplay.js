@@ -52,11 +52,11 @@ const LogoDisplay = ({ logoUrl, onImageError, size = 60 }) => {
         }
       }}
       onLoad={() => {
-        console.log('✅ Logo image loaded successfully');
+        // console.log('✅ Logo image loaded successfully');
         setImageError(false);
       }}
       onLoadStart={() => {
-        console.log('🔄 Starting to load logo image:', logoUrl);
+        // console.log('🔄 Starting to load logo image:', logoUrl);
       }}
     />
   );

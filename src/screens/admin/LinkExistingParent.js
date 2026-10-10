@@ -949,7 +949,6 @@ const styles = StyleSheet.create({
     ...Platform.select({
       web: {
         boxShadow: '0px 8px 32px rgba(0, 0, 0, 0.2)',
-        animation: 'slideInFromBottom 0.5s ease-out',
       },
     }),
   },

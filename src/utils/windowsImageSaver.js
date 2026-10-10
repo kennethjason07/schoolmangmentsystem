@@ -45,7 +45,6 @@ export class WindowsImageSaver {
     try {
       // Check if FileSystem is available (not available on web)
       if (!FileSystem || Platform.OS === 'web') {
-        console.log('🌐 FileSystem not available on web platform, skipping directory initialization');
         this.downloadDirectory = null; // Set to null for web
         return;
       }

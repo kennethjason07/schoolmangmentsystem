@@ -45,7 +45,7 @@ export const useNavigateWithStatePreservation = () => {
       const routeExists = findRouteInState(state, screenName);
       
       // Only log for debugging, don't show warning for nested routes
-      console.log(`🧭 SafeNavigate: Navigating to ${screenName}`);
+      // console.log(`🧭 SafeNavigate: Navigating to ${screenName}`);
       
       // Always try to navigate - React Navigation will handle invalid routes
       navigation.navigate(screenName, params);

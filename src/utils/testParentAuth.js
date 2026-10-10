@@ -140,8 +140,4 @@ export const quickParentAuthTest = async () => {
 if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
   window.testParentAuth = testParentAuth;
   window.quickParentAuthTest = quickParentAuthTest;
-  
-  console.log('🧪 [DEV TOOLS] Parent auth test functions available:');
-  console.log('   • window.testParentAuth() - Run full parent auth tests');
-  console.log('   • window.quickParentAuthTest() - Run quick parent auth test');
 }

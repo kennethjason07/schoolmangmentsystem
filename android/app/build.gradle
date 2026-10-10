@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.vidyasetu.app'
+    namespace 'com.campussentinel.app'
     defaultConfig {
-        applicationId 'com.vidyasetu.app'
+        applicationId 'com.campussentinel.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 2
@@ -104,15 +104,27 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // TODO: For local release builds, add your production keystore here:
+        // release {
+        //     if (project.hasProperty('MYAPP_RELEASE_STORE_FILE')) {
+        //         storeFile file(MYAPP_RELEASE_STORE_FILE)
+        //         storePassword MYAPP_RELEASE_STORE_PASSWORD
+        //         keyAlias MYAPP_RELEASE_KEY_ALIAS
+        //         keyPassword MYAPP_RELEASE_KEY_PASSWORD
+        //     }
+        // }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // NOTE: For EAS Cloud builds, EAS handles signing and ignores this block.
+            // If building locally, you MUST configure a production signingConfig above.
+            // DO NOT use signingConfigs.debug for Play Store releases.
+            
+            // signingConfig signingConfigs.release // Uncomment this when ready
+            
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

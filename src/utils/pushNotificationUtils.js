@@ -1,7 +1,16 @@
-import * as Device from 'expo-device';
-import * as Notifications from 'expo-notifications';
-import Constants from 'expo-constants';
 import { Platform, Alert } from 'react-native';
+import * as Device from 'expo-device';
+import Constants from 'expo-constants';
+
+// Dynamically import Notifications to prevent web warnings
+const Notifications = Platform.OS === 'web' ? {
+  setNotificationHandler: () => {},
+  getPermissionsAsync: async () => ({ status: 'undetermined' }),
+  requestPermissionsAsync: async () => ({ status: 'undetermined' }),
+  getExpoPushTokenAsync: async () => ({ data: '' }),
+  setNotificationChannelAsync: async () => {},
+  AndroidImportance: { MAX: 4 }, // Mock for completeness
+} : require('expo-notifications');
 
 /**
  * Get Expo Push Token for the current device
@@ -87,7 +96,7 @@ export async function sendPushNotification(expoPushToken, title, body, data = {}
     data: {
       ...data,
       timestamp: Date.now(),
-      source: 'vidyasetu_app'
+      source: 'campussentinel_app'
     },
   };
 

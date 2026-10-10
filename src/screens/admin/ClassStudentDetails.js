@@ -92,7 +92,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
       // Only reload if we're returning from another screen (not initial mount)
       // Check if route params indicate we should refresh
       if (route.params?.shouldRefresh || route.params?.concessionUpdated) {
-        console.log('🔄 Screen focused with refresh request - reloading student data...');
+        // console.log('🔄 Screen focused with refresh request - reloading student data...');
         loadClassStudentDetails();
         
         // Clear the refresh flag to prevent unnecessary reloads
@@ -124,7 +124,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
               filter: `tenant_id=eq.${tenantId}`
             },
             (payload) => {
-              console.log('🎯 Student discount changed:', payload);
+              // console.log('🎯 Student discount changed:', payload);
               
               // Check if the change affects students in this class
               const { new: newRecord, old: oldRecord } = payload;
@@ -139,7 +139,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
           )
           .subscribe();
 
-        console.log('✅ Set up real-time listener for student discounts');
+        // console.log('✅ Set up real-time listener for student discounts');
       } catch (error) {
         console.warn('⚠️ Failed to setup discounts listener:', error);
       }
@@ -153,7 +153,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
     return () => {
       if (discountsSubscription) {
         supabase.removeChannel(discountsSubscription);
-        console.log('🧹 Cleaned up discounts real-time listener');
+        // console.log('🧹 Cleaned up discounts real-time listener');
       }
     };
   }, [user?.tenant_id, classData.classId, classStudents]);
@@ -161,12 +161,12 @@ const ClassStudentDetails = ({ route, navigation }) => {
   // Load school details and logo
   const loadSchoolDetails = async () => {
     try {
-      console.log('🏫 Loading school details with tenant filtering...');
+      // console.log('🏫 Loading school details with tenant filtering...');
       
       // Use tenant-aware helper instead of direct query
       const { data: schoolData, error } = await dbHelpers.getSchoolDetails();
 
-      console.log('🏫 School details query result:', { schoolData, error });
+      // console.log('🏫 School details query result:', { schoolData, error });
 
       if (error) {
         console.error('❌ Error loading school details:', error);
@@ -178,14 +178,14 @@ const ClassStudentDetails = ({ route, navigation }) => {
       }
 
       if (schoolData) {
-        console.log('✅ School details loaded:', schoolData);
-        console.log('📸 Logo URL from database:', schoolData.logo_url);
+        // console.log('✅ School details loaded:', schoolData);
+        // console.log('📸 Logo URL from database:', schoolData.logo_url);
         setSchoolDetails(schoolData);
         
         // Load school logo if available
         if (schoolData.logo_url) {
           try {
-            console.log('🔄 Attempting to load logo from:', schoolData.logo_url);
+            // console.log('🔄 Attempting to load logo from:', schoolData.logo_url);
             
             // First, let's check if the file exists
             const { data: fileInfo, error: fileError } = await supabase.storage
@@ -195,29 +195,29 @@ const ClassStudentDetails = ({ route, navigation }) => {
                 search: schoolData.logo_url
               });
             
-            console.log('📁 Storage file check:', { fileInfo, fileError });
+            // console.log('📁 Storage file check:', { fileInfo, fileError });
             
             // Get public URL regardless of file check result
             const { data: logoData } = await supabase.storage
               .from('school-assets')
               .getPublicUrl(schoolData.logo_url);
             
-            console.log('🌐 Public URL data:', logoData);
+            // console.log('🌐 Public URL data:', logoData);
             
             if (logoData?.publicUrl) {
-              console.log('✅ School logo URL generated:', logoData.publicUrl);
-              console.log('📷 Logo will be used in receipt generation');
-              console.log('🖼️ Logo URL will be passed to LogoDisplay component via schoolDetails.logo_url');
+              // console.log('✅ School logo URL generated:', logoData.publicUrl);
+              // console.log('📷 Logo will be used in receipt generation');
+              // console.log('🖼️ Logo URL will be passed to LogoDisplay component via schoolDetails.logo_url');
               setSchoolLogo(logoData.publicUrl);
               
               // Test if the image actually loads
               fetch(logoData.publicUrl, { method: 'HEAD' })
                 .then(response => {
-                  console.log('🖼️ Logo accessibility test:', {
+                  /* console.log('🖼️ Logo accessibility test:', {
                     status: response.status,
                     ok: response.ok,
                     headers: Object.fromEntries(response.headers.entries())
-                  });
+                  }); */
                   if (!response.ok) {
                     console.warn('⚠️ Logo URL is not accessible:', response.status);
                   }
@@ -236,10 +236,10 @@ const ClassStudentDetails = ({ route, navigation }) => {
             );
           }
         } else {
-          console.log('ℹ️ No logo URL found in school details');
+          // console.log('ℹ️ No logo URL found in school details');
         }
       } else {
-        console.log('ℹ️ No school details found, using default');
+        // console.log('ℹ️ No school details found, using default');
         setSchoolDetails({
           name: 'School Management System',
           type: 'School',
@@ -289,27 +289,27 @@ const ClassStudentDetails = ({ route, navigation }) => {
 
   // Load detailed student information for the class
   const loadClassStudentDetails = async () => {
-    console.log('🚀 [DEBUG] loadClassStudentDetails function called!');
-    console.log('🚀 [DEBUG] classData:', classData);
-    console.log('🚀 [DEBUG] user:', user);
+    // console.log('🚀 [DEBUG] loadClassStudentDetails function called!');
+    // console.log('🚀 [DEBUG] classData:', classData);
+    // console.log('🚀 [DEBUG] user:', user);
     
     // Outer try-catch to catch ALL possible errors
     try {
       // Inner try-catch for main function logic
       try {
-        console.log('🚀 [DEBUG] Setting loading to true...');
+        // console.log('🚀 [DEBUG] Setting loading to true...');
         setLoading(true);
 
       // 🏦 GET TENANT ID FOR DATA ISOLATION
       const tenantId = user?.tenant_id;
       
       // 🐛 COMPREHENSIVE TENANT DEBUGGING
-      console.log('🔍 [TENANT DEBUG] Starting ClassStudentDetails loadClassStudentDetails');
-      console.log('🔍 [TENANT DEBUG] Full user object:', JSON.stringify(user, null, 2));
-      console.log('🔍 [TENANT DEBUG] Extracted tenant_id:', tenantId);
-      console.log('🔍 [TENANT DEBUG] Tenant ID type:', typeof tenantId);
-      console.log('🔍 [TENANT DEBUG] Is tenant_id truthy?', !!tenantId);
-      console.log('🔍 [TENANT DEBUG] ClassData:', JSON.stringify(classData, null, 2));
+      // console.log('🔍 [TENANT DEBUG] Starting ClassStudentDetails loadClassStudentDetails');
+      // console.log('🔍 [TENANT DEBUG] Full user object:', JSON.stringify(user, null, 2));
+      // console.log('🔍 [TENANT DEBUG] Extracted tenant_id:', tenantId);
+      // console.log('🔍 [TENANT DEBUG] Tenant ID type:', typeof tenantId);
+      // console.log('🔍 [TENANT DEBUG] Is tenant_id truthy?', !!tenantId);
+      // console.log('🔍 [TENANT DEBUG] ClassData:', JSON.stringify(classData, null, 2));
       
       if (!tenantId) {
         console.error('❌ [TENANT DEBUG] CRITICAL: No tenant_id found in user object');
@@ -319,16 +319,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
         return;
       }
       
-      console.log('✅ [TENANT DEBUG] Tenant ID validation passed:', tenantId);
-
-      const currentYear = new Date().getFullYear();
-      const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
-
-      // Get detailed student information for the selected class with tenant isolation
-      console.log('🎯 [TENANT DEBUG] About to execute student query with parameters:');
-      console.log('🎯 [TENANT DEBUG] Query table:', TABLES.STUDENTS);
-      console.log('🎯 [TENANT DEBUG] Class ID filter:', classData.classId);
-      console.log('🎯 [TENANT DEBUG] Tenant ID filter:', tenantId);
+// Logs removed for cleanup
       
       const { data: studentsData, error } = await supabase
         .from(TABLES.STUDENTS)
@@ -350,42 +341,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
         .eq('class_id', classData.classId)
         .eq('tenant_id', tenantId); // 🔒 TENANT ISOLATION
 
-      console.log('📊 [TENANT DEBUG] Student query results:');
-      console.log('📊 [TENANT DEBUG] Students found:', studentsData?.length || 0);
-      console.log('📊 [TENANT DEBUG] Query error:', error);
-      if (studentsData && studentsData.length > 0) {
-        console.log('📊 [TENANT DEBUG] Sample student data:', studentsData[0]);
-      } else {
-        console.log('❌ [TENANT DEBUG] NO STUDENTS FOUND - This is the root cause!');
-        console.log('❌ [TENANT DEBUG] Possible causes:');
-        console.log('❌ [TENANT DEBUG] 1. No students exist for this class_id:', classData.classId);
-        console.log('❌ [TENANT DEBUG] 2. No students exist for this tenant_id:', tenantId);
-        console.log('❌ [TENANT DEBUG] 3. Students exist but with different class_id or tenant_id');
-        console.log('❌ [TENANT DEBUG] 4. Database connectivity issues');
-        
-        // Let's try a broader query to see what students exist
-        try {
-          const { data: allStudentsForTenant } = await supabase
-            .from(TABLES.STUDENTS)
-            .select('id, name, class_id, tenant_id')
-            .eq('tenant_id', tenantId);
-          console.log('🔍 [TENANT DEBUG] All students for this tenant:', allStudentsForTenant?.length || 0);
-          if (allStudentsForTenant && allStudentsForTenant.length > 0) {
-            console.log('🔍 [TENANT DEBUG] Sample tenant student:', allStudentsForTenant[0]);
-          }
-          
-          const { data: allStudentsForClass } = await supabase
-            .from(TABLES.STUDENTS)
-            .select('id, name, class_id, tenant_id')
-            .eq('class_id', classData.classId);
-          console.log('🔍 [TENANT DEBUG] All students for this class (any tenant):', allStudentsForClass?.length || 0);
-          if (allStudentsForClass && allStudentsForClass.length > 0) {
-            console.log('🔍 [TENANT DEBUG] Sample class student:', allStudentsForClass[0]);
-          }
-        } catch (debugError) {
-          console.error('🔍 [TENANT DEBUG] Error in debug queries:', debugError);
-        }
-      }
+// Logs removed for cleanup
 
       if (error) throw error;
 
@@ -397,12 +353,12 @@ const ClassStudentDetails = ({ route, navigation }) => {
         .eq('tenant_id', tenantId) // 🔒 TENANT ISOLATION
         .is('student_id', null); // Only class-level fees
 
-      console.log('🏫 ClassStudentDetails Debug Info:');
-      console.log('📚 Class ID:', classData.classId);
-      console.log('🏢 Tenant ID:', tenantId);
-      console.log('🧮 Fee structures found:', feeStructureData?.length || 0);
+      // console.log('🏫 ClassStudentDetails Debug Info:');
+      // console.log('📚 Class ID:', classData.classId);
+      // console.log('🏢 Tenant ID:', tenantId);
+      // console.log('🧮 Fee structures found:', feeStructureData?.length || 0);
       if (feeStructureData && feeStructureData.length > 0) {
-        console.log('💰 Sample fee structure:', feeStructureData[0]);
+        // console.log('💰 Sample fee structure:', feeStructureData[0]);
       }
 
       if (feeError) throw feeError;
@@ -444,8 +400,8 @@ const ClassStudentDetails = ({ route, navigation }) => {
         console.warn('⚠️ Failed to load parent names:', parentErr);
       }
       
-      console.log('🎫 Fetching concessions for students:', studentIds);
-      console.log('🎫 Academic Year:', academicYear);
+      // console.log('🎫 Fetching concessions for students:', studentIds);
+      // console.log('🎫 Academic Year:', academicYear);
       
       if (studentIds.length > 0) {
         const { data: concessions, error: concessionsError } = await supabase
@@ -455,8 +411,8 @@ const ClassStudentDetails = ({ route, navigation }) => {
           .eq('tenant_id', tenantId) // 🔒 TENANT ISOLATION
           .eq('is_active', true);
         
-        console.log('🎫 Raw concessions from DB:', concessions);
-        console.log('🎫 Concessions error:', concessionsError);
+        // console.log('🎫 Raw concessions from DB:', concessions);
+        // console.log('🎫 Concessions error:', concessionsError);
         
         if (!concessionsError && concessions) {
           loadedConcessionsData = concessions;
@@ -468,9 +424,10 @@ const ClassStudentDetails = ({ route, navigation }) => {
 
       // Process student data with CORRECTED concession logic
       const processedStudents = studentsData.map(student => {
-        // Filter payments for current academic year
+        // Filter payments for current academic year using class year first (context), then student's year
+        const targetAcademicYear = classData.academic_year || student.academic_year || academicYear;
         const currentYearPayments = student.student_fees?.filter(
-          payment => payment.academic_year === academicYear
+          payment => payment.academic_year === targetAcademicYear
         ) || [];
 
         // Calculate total paid by this student
@@ -746,14 +703,14 @@ const ClassStudentDetails = ({ route, navigation }) => {
   // Load fee components for the class
   const loadFeeComponents = async () => {
     try {
-      console.log('💰 Loading fee components for class:', classData.classId);
+      // console.log('💰 Loading fee components for class:', classData.classId);
       
       const { data: feeComponentsData, error } = await supabase
         .from(TABLES.FEE_STRUCTURE)
         .select('*')
         .eq('class_id', classData.classId);
 
-      console.log('💰 Fee components query result:', { feeComponentsData, error });
+      // console.log('💰 Fee components query result:', { feeComponentsData, error });
       
       if (error) {
         console.error('💰 Error loading fee components:', error);
@@ -761,10 +718,10 @@ const ClassStudentDetails = ({ route, navigation }) => {
       }
 
       if (feeComponentsData && feeComponentsData.length > 0) {
-        console.log('💰 Fee components loaded:', feeComponentsData.map(c => c.fee_component));
+        // console.log('💰 Fee components loaded:', feeComponentsData.map(c => c.fee_component));
         setFeeComponents(feeComponentsData);
       } else {
-        console.log('💰 No fee components found for class');
+        // console.log('💰 No fee components found for class');
         setFeeComponents([]);
       }
     } catch (error) {
@@ -1142,14 +1099,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
 
   // Generate receipt HTML using unified template (copied from student)
   const generateReceiptHTML = async (receiptData, preloadedLogoUrl = null) => {
-    console.log('🔥 RECEIPT DEBUG [ADMIN] - Starting receipt generation');
-    console.log('🔥 RECEIPT DEBUG [ADMIN] - Original receipt data:', JSON.stringify(receiptData, null, 2));
-    console.log('🔥 RECEIPT DEBUG [ADMIN] - School details:', JSON.stringify(schoolDetails, null, 2));
-    console.log('🔥 RECEIPT DEBUG [ADMIN] - Preloaded logo URL for print/PDF:', preloadedLogoUrl);
-    
     try {
-      console.log('🔥 RECEIPT DEBUG [ADMIN] - Attempting to generate unified receipt HTML...');
-      
       // Convert admin receipt data format to match unified template expectations
       const unifiedReceiptData = {
         student_name: receiptData.student_name,
@@ -1168,32 +1118,15 @@ const ClassStudentDetails = ({ route, navigation }) => {
         student_academic_year: receiptData.academic_year || selectedStudent?.academic_year
       };
       
-      console.log('🔥 RECEIPT DEBUG [ADMIN] - Father name check:', {
-        originalFatherName: receiptData.father_name,
-        unifiedFatherName: unifiedReceiptData.father_name,
-        hasParentName: !!receiptData.father_name
-      });
-      
-      console.log('🔥 RECEIPT DEBUG [ADMIN] - Unified receipt data:', JSON.stringify(unifiedReceiptData, null, 2));
-      console.log('🔥 RECEIPT DEBUG [ADMIN] - About to call generateUnifiedReceiptHTML...');
-      
       // Use the unified receipt template with preloaded logo URL for print/PDF
       const htmlContent = await generateUnifiedReceiptHTML(unifiedReceiptData, schoolDetails, preloadedLogoUrl);
       
-      console.log('🔥 RECEIPT DEBUG [ADMIN] - Unified receipt HTML generated successfully!');
-      console.log('🔥 RECEIPT DEBUG [ADMIN] - Generated HTML length:', htmlContent?.length || 0);
-      console.log('🔥 RECEIPT DEBUG [ADMIN] - HTML preview (first 500 chars):', htmlContent?.substring(0, 500));
-      
       return htmlContent;
     } catch (error) {
-      console.log('🔥 RECEIPT DEBUG [ADMIN] - ❌ UNIFIED TEMPLATE FAILED!');
-      console.error('🔥 RECEIPT DEBUG [ADMIN] - Error details:', error);
-      console.error('🔥 RECEIPT DEBUG [ADMIN] - Error stack:', error.stack);
-      console.log('🔥 RECEIPT DEBUG [ADMIN] - Falling back to old receipt method...');
+      console.error('Unified Template Failed:', error);
       
       // Fallback to old method if unified template fails
       const fallbackHTML = await generateFallbackReceiptHTML(receiptData);
-      console.log('🔥 RECEIPT DEBUG [ADMIN] - Fallback HTML generated, length:', fallbackHTML?.length || 0);
       return fallbackHTML;
     }
   };
@@ -1543,11 +1476,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
         return;
       }
 
-      console.log('🖨️ Starting isolated print process');
-      
       await printIsolatedReceipt(receiptData, schoolDetails);
-      
-      console.log('✅ Admin - Isolated print completed successfully');
     } catch (error) {
       console.error('❌ Admin - Isolated print error:', error);
       Alert.alert('Print Error', 'Failed to print receipt. Please try again.');
@@ -1557,11 +1486,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
   // Handle share receipt with completely isolated PDF generation
   const handleShareReceipt = async (receiptData) => {
     try {
-      console.log('💾 Starting isolated PDF generation');
-
       await generateIsolatedPDF(receiptData, schoolDetails);
-      
-      console.log('✅ Admin - Isolated PDF generated and shared successfully');
     } catch (error) {
       console.error('❌ Admin - Isolated PDF generation error:', error);
       Alert.alert('Error', 'Failed to generate receipt PDF. Please try again.');
@@ -1661,17 +1586,10 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
       
       setPaymentLoading(true);
       
-      const currentYear = new Date().getFullYear();
-      const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
-
       // Generate sequential receipt number
       const receiptNumber = await getNextReceiptNumber();
-      console.log('Admin - Generated receipt number for new payment:', receiptNumber);
-
+      
       // Insert payment record
-      const feeComponentName = selectedFeeComponent === 'custom' 
-        ? (paymentRemarks || 'General Fee Payment')
-        : selectedFeeComponent || 'General Fee Payment';
 
       const { data: paymentData, error } = await supabase
         .from(TABLES.STUDENT_FEES)
@@ -1717,17 +1635,12 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
       // Show success alert while receipt is displayed
       Alert.alert(
         'Payment Recorded Successfully! ✅',
-        `Payment of ₹${parseFloat(paymentAmount).toFixed(2)} has been recorded for ${selectedStudent.name}.\n\nReceipt Number: ${receiptNumber}\nFee Component: ${feeComponentName}\nPayment Mode: ${paymentMode}`
       );
-      
+
       // Refresh the data to show updated payment status
       await loadClassStudentDetails();
       
-      // 🚀 DYNAMIC UPDATE: Force UI refresh by updating state
-      console.log('🔄 Payment successful - triggering dynamic UI update...');
-      
     } catch (error) {
-      console.error('Error recording payment:', error);
       Alert.alert(
         'Payment Failed',
         `Failed to record payment: ${error.message}\n\nPlease try again or contact support.`,
@@ -3025,14 +2938,7 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
                   {/* Header - Global's Sanmarg Format */}
                   <View style={styles.receiptDocumentHeader}>
                     <View style={styles.receiptLogoContainer}>
-                      {console.log('🏦 Receipt Logo Debug:', {
-                        schoolDetails: !!schoolDetails,
-                        logoUrl: schoolDetails?.logo_url,
-                        schoolLogo: schoolLogo,
-                        hasLogoUrl: !!schoolDetails?.logo_url
-                      })}
-                      <LogoDisplay 
-                        logoUrl={schoolDetails?.logo_url}
+                      <LogoDisplay
                         size={80}
                         style={styles.receiptLogoRound}
                         fallbackIcon="school-outline"
@@ -3151,10 +3057,9 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
 
             {/* Action Buttons */}
             <View style={styles.receiptActionButtons}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.receiptPrintButton} 
                 onPress={() => {
-                  console.log('🖨️ Print receipt');
                   lastPaymentRecord && handlePrintReceipt(lastPaymentRecord);
                 }}
               >
@@ -3340,7 +3245,6 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
               <TouchableOpacity 
                 style={styles.receiptPrintButton} 
                 onPress={() => {
-                  console.log('🖨️ Print receipt');
                   selectedPaymentForReceipt && handlePrintReceipt(selectedPaymentForReceipt);
                 }}
               >
@@ -3450,11 +3354,18 @@ const styles = StyleSheet.create({
   tabContainer: {
     backgroundColor: '#fff',
     flexDirection: 'row',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   tab: {
     flex: 1,
@@ -3481,11 +3392,18 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginBottom: 20,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 3px 6px rgba(0, 0, 0, 0.15)',
+      },
+      default: {
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+      }
+    }),
   },
   summaryHeader: {
     flexDirection: 'row',
@@ -3534,11 +3452,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 20,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   searchContainer: {
     flexDirection: 'row',
@@ -3656,11 +3581,18 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 18,
     marginBottom: 16,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 3px 6px rgba(0, 0, 0, 0.12)',
+      },
+      default: {
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.12,
+        shadowRadius: 6,
+      }
+    }),
     borderLeftWidth: 4,
     borderLeftColor: '#E0E0E0',
   },
@@ -3796,11 +3728,18 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#E0E0E0',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   modalTitle: {
     fontSize: 18,
@@ -3823,11 +3762,18 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginBottom: 20,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 3px 6px rgba(0, 0, 0, 0.15)',
+      },
+      default: {
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+      }
+    }),
   },
   studentSummaryHeader: {
     flexDirection: 'row',
@@ -3930,11 +3876,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   paymentHistoryHeader: {
     flexDirection: 'row',
@@ -3991,11 +3944,18 @@ const styles = StyleSheet.create({
     padding: 20,
     width: '48%',
     alignItems: 'center',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 3px 6px rgba(0, 0, 0, 0.15)',
+      },
+      default: {
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+      }
+    }),
   },
   totalStudentsCard: {
     borderTopColor: '#2196F3',
@@ -4025,11 +3985,18 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginBottom: 20,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 3px 6px rgba(0, 0, 0, 0.15)',
+      },
+      default: {
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+      }
+    }),
   },
   statusBreakdownTitle: {
     fontSize: 18,
@@ -4089,11 +4056,18 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginBottom: 20,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 3px 6px rgba(0, 0, 0, 0.15)',
+      },
+      default: {
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+      }
+    }),
   },
   financialSummaryTitle: {
     fontSize: 18,
@@ -4128,11 +4102,18 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginBottom: 20,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 3px 6px rgba(0, 0, 0, 0.15)',
+      },
+      default: {
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+      }
+    }),
   },
   activitySummaryTitle: {
     fontSize: 18,
@@ -4179,11 +4160,18 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     flex: 1,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   markAsPaidButtonText: {
     color: '#fff',
@@ -4200,11 +4188,18 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     flex: 1,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   feeConcessionButtonText: {
     color: '#fff',
@@ -4221,11 +4216,18 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     flex: 1,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   upiPaymentButtonText: {
     color: '#fff',
@@ -4238,11 +4240,18 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   paymentFormTitle: {
     fontSize: 18,
@@ -4327,11 +4336,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 16,
     marginTop: 20,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 3px 6px rgba(0, 0, 0, 0.15)',
+      },
+      default: {
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+      }
+    }),
   },
   submitButtonDisabled: {
     opacity: 0.6,
@@ -4350,11 +4366,18 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderLeftWidth: 4,
     borderLeftColor: '#FF9800',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 1,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+      }
+    }),
   },
   concessionsHeader: {
     flexDirection: 'row',
@@ -4562,11 +4585,18 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     margin: 16,
     padding: 20,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 3px 6px rgba(0, 0, 0, 0.15)',
+      },
+      default: {
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+      }
+    }),
   },
   receiptHeader: {
     borderBottomWidth: 2,
@@ -4741,11 +4771,18 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 20,
     flex: 1,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   printButtonText: {
     color: '#fff',
@@ -4761,11 +4798,18 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 20,
     flex: 1,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   shareButtonText: {
     color: '#fff',
@@ -4927,11 +4971,18 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     marginTop: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   upiQRButtonText: {
     color: '#fff',
@@ -4980,11 +5031,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#2196F3',
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
     ...Platform.select({
       web: {
         boxShadow: '0 4px 12px rgba(33, 150, 243, 0.4)',
@@ -4995,6 +5041,13 @@ const styles = StyleSheet.create({
           transform: 'scale(1.1)',
         },
       },
+      default: {
+        elevation: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      }
     }),
   },
   
@@ -5009,11 +5062,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     width: '100%',
     height: '100%',
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 5px 15px rgba(0, 0, 0, 0.3)',
+      },
+      default: {
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 5 },
+        shadowOpacity: 0.3,
+        shadowRadius: 10,
+      }
+    }),
   },
   receiptCloseButton: {
     position: 'absolute',
@@ -5026,11 +5086,18 @@ const styles = StyleSheet.create({
     height: 50,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 3px 6px rgba(0, 0, 0, 0.2)',
+      },
+      default: {
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.2,
+        shadowRadius: 6,
+      }
+    }),
   },
   receiptScrollView: {
     flex: 1,
@@ -5053,11 +5120,18 @@ const styles = StyleSheet.create({
     minHeight: 500,
     width: '100%',
     maxWidth: 800,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.15)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+        elevation: 8,
+      }
+    }),
   },
   receiptDocumentHeader: {
     flexDirection: 'row',
@@ -5205,12 +5279,19 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 8,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
     minWidth: 120,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   receiptPrintButtonText: {
     color: '#fff',
@@ -5226,12 +5307,19 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 8,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
     minWidth: 120,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      }
+    }),
   },
   receiptDownloadButtonText: {
     color: '#fff',

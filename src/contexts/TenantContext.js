@@ -1,16 +1,15 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../utils/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentUserTenantByEmail } from '../utils/getTenantByEmail';
 import { validateTenantAccess, createTenantQuery } from '../utils/tenantValidation';
 import { initializeTenantHelpers, resetTenantHelpers } from '../utils/sharedTenantUtils';
-// DISABLED: Auto-importing test utilities that run database queries before login
-// import { runAllProductionTests } from '../utils/supabaseProductionTest';
-// import { testTenantQueryHelper, createTenantQuery, executeTenantQuery } from '../utils/tenantQueryHelper';
-// import '../utils/quickSupabaseTest'; // Auto-run quick tests
-// import '../utils/testFixedTenantBuilder'; // Auto-run fixed builder tests
+import { useAuth } from '../utils/AuthContext';
 
 const TenantContext = createContext({});
+
+// Debug flag - set to false to disable verbose tenant logging
+const DEBUG_TENANT_LOGS = false;
 
 export const useTenant = () => {
   const context = useContext(TenantContext);
@@ -24,28 +23,7 @@ export const useTenant = () => {
 export const useTenantContext = useTenant;
 
 export const TenantProvider = ({ children }) => {
-  console.log('🏗️ TenantProvider: Component initialized');
-  
-  // DISABLED: Database query tests before authentication
-  // These tests are now only run after successful authentication
-  // console.log('🧪 TenantProvider: Running successful query pattern tests...');
-  // try {
-  //   // Test only the working tenant query helper with the known tenant ID
-  //   const testTenantId = 'b8f8b5f0-1234-4567-8901-123456789000';
-  //   console.log('🧪 TenantProvider: Testing working tenant patterns with tenant:', testTenantId);
-  //   testTenantQueryHelper(testTenantId).then(success => {
-  //     console.log('🧪 TenantProvider: ✅ All tenant query tests:', success ? 'PASSED' : 'FAILED');
-  //     if (success) {
-  //       console.log('🎉 TENANT QUERIES FULLY OPERATIONAL!');
-  //     }
-  //   }).catch(error => {
-  //     console.error('🧪 TenantProvider: Tenant query test error:', error);
-  //   });
-  //   
-  // } catch (testError) {
-  //   console.error('🧪 TenantProvider: Query tests failed:', testError);
-  // }
-  
+  const { user, loading: authLoading } = useAuth();
   const [currentTenant, setCurrentTenant] = useState(null);
   const [availableTenants, setAvailableTenants] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -54,278 +32,156 @@ export const TenantProvider = ({ children }) => {
   // 🚀 ENHANCED: Cached tenant ID for reliable access
   const [cachedTenantId, setCachedTenantId] = useState(null);
   const [tenantInitialized, setTenantInitialized] = useState(false);
-  
-  console.log('🔍 TenantProvider: Current state:', {
-    currentTenant: currentTenant ? 'SET' : 'NULL',
-    loading,
-    error: error || 'none'
-  });
+  const initializationInProgress = useRef(false);
 
   // Load tenant data on app start - enhanced initialization with better error handling
   useEffect(() => {
-    console.log('🚀 TenantProvider: useEffect TRIGGERED - starting enhanced tenant initialization');
-    
     const initializeTenantData = async () => {
+      // If auth is still loading, wait
+      if (authLoading) return;
+      
+      // Fast path: If AuthContext already found the tenant_id, use it!
+      if (user?.tenant_id && !tenantInitialized && !initializationInProgress.current) {
+        const result = await initializeTenant(user.tenant_id);
+        if (result.success) return;
+      }
+
       try {
-        console.log('🚀 TenantProvider: Calling initializeTenant...');
         const result = await initializeTenant();
         
-        if (result.success) {
-          console.log('✅ TenantProvider: Tenant initialization successful:', {
-            tenantId: result.tenantId,
-            fromCache: result.fromCache,
-            fromStorage: result.fromStorage
-          });
-        } else if (result.isAuthError) {
-          console.log('🚀 TenantProvider: Auth error during initialization (expected during login)');
-          // For auth errors during startup, set loading to false but don't set error
-          setLoading(false);
-        } else {
-          console.error('❌ TenantProvider: Tenant initialization failed:', result.error);
-          // Only set error for non-auth issues
+        // Handle redundancy gracefully - no need to log error if it's just skipping a concurrent call
+        if (!result.success && !result.inProgress && !result.isAuthError) {
+          console.error('❌ TenantProvider: Tenant initialization failed:', result.error || 'Unknown error');
           if (!result.error?.includes('authenticated user')) {
-            setError(result.error);
+            setError(result.error || 'Failed to initialize tenant');
           }
-          setLoading(false);
         }
       } catch (error) {
         console.error('❌ TenantProvider: Failed to initialize tenant:', error);
-        // Check if this is an auth-related error
         const isAuthError = error.message?.includes('authenticated user') || 
-                           error.message?.includes('session') ||
-                           error.message?.includes('JWT');
+                           error.message?.includes('session');
         
         if (!isAuthError) {
           setError(`Failed to initialize: ${error.message}`);
         }
-        setLoading(false);
-      }
-    };
-    
-    // Initialize with a small delay to allow AuthContext to complete first
-    const timeoutId = setTimeout(initializeTenantData, 100);
-    
-    console.log('🚀 TenantProvider: useEffect setup complete');
-    
-    return () => clearTimeout(timeoutId);
-  }, []);
-  
-  // 🚀 ENHANCED: Auto-initialize tenant when user authenticates
-  useEffect(() => {
-    const checkUserAndInitializeTenant = async () => {
-      // Only proceed if we haven't initialized tenant yet
-      if (tenantInitialized) {
-        return;
-      }
-      
-      try {
-        // Check if user is authenticated
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        
-        if (!authError && user) {
-          console.log('🚀 TenantContext: User authenticated, triggering tenant initialization:', user.email);
-          
-          // Auto-initialize tenant using email-based lookup
-          await loadTenantFromStorage();
+      } finally {
+        if (!initializationInProgress.current) {
+          setLoading(false);
         }
-      } catch (error) {
-        // Silent error - we don't want to break the app if this fails
-        console.warn('⚠️ TenantContext: Error during auto-initialization:', error);
       }
     };
     
-    // Check for authenticated user and initialize if needed
-    checkUserAndInitializeTenant();
-    
-    // Also listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session?.user && !tenantInitialized) {
-        console.log('🚀 TenantContext: User signed in, auto-initializing tenant:', session.user.email);
-        await loadTenantFromStorage();
-      } else if (event === 'SIGNED_OUT') {
-        console.log('🚀 TenantContext: User signed out, clearing tenant data');
-        await clearTenant();
-      }
-    });
-    
-    return () => {
-      subscription?.unsubscribe();
-    };
-  }, [tenantInitialized]);
+    initializeTenantData();
+  }, [authLoading, user?.tenant_id, tenantInitialized]);
+  
+  // Clear tenant on sign out
+  useEffect(() => {
+    if (!authLoading && !user && tenantInitialized) {
+      clearTenant();
+    }
+  }, [user, authLoading, tenantInitialized]);
+
 
   // 🚀 ENHANCED: Get cached tenant ID (most reliable method)
   const getCachedTenantId = () => {
     if (cachedTenantId) {
-      console.log('🚀 TenantContext: Using cached tenant ID:', cachedTenantId);
       return cachedTenantId;
     }
     
     if (currentTenant?.id) {
-      console.log('🚀 TenantContext: Using current tenant ID:', currentTenant.id);
       setCachedTenantId(currentTenant.id);
       return currentTenant.id;
     }
     
-    console.warn('⚠️ TenantContext: No cached tenant ID available');
     return null;
   };
   
-  // 🚀 ENHANCED: Initialize tenant once and cache it
-  const initializeTenant = async () => {
-    if (tenantInitialized) {
-      console.log('🚀 TenantContext: Tenant already initialized, using cached data');
-      return {
-        success: true,
-        tenantId: cachedTenantId,
-        tenant: currentTenant,
-        fromCache: true
-      };
+  // 🚀 HIGHLY OPTIMIZED: Central initialization function
+  const initializeTenant = async (forcedTenantId = null) => {
+    // If tenant is already initialized and matches, just return it
+    if (tenantInitialized && (!forcedTenantId || forcedTenantId === cachedTenantId)) {
+      if (DEBUG_TENANT_LOGS) console.log('🚀 TenantContext: Already initialized, using cached data');
+      return { success: true, tenantId: cachedTenantId, tenant: currentTenant };
     }
-    
+
+    if (initializationInProgress.current) {
+      if (DEBUG_TENANT_LOGS) console.log('⏳ Tenant initialization already in progress, skipping redundant call...');
+      return { success: false, inProgress: true };
+    }
+
     try {
+      initializationInProgress.current = true;
       setLoading(true);
       setError(null);
       
-      console.log('🚀 TenantContext: Initializing tenant for first time...');
-      
-      // Try to load from AsyncStorage first and restore tenant from storage
-      let storedTenantId = null;
-      try {
-        storedTenantId = await AsyncStorage.getItem('currentTenantId');
-        console.log('🚀 TenantContext: Retrieved stored tenant ID:', storedTenantId);
-        
-        if (storedTenantId) {
-          // Try to load the full tenant details from database
-          const { data: storedTenant, error: tenantError } = await supabase
-            .from('tenants')
-            .select('*')
-            .eq('id', storedTenantId)
-            .eq('status', 'active')
-            .maybeSingle();
-          
-          if (!tenantError && storedTenant) {
-            console.log('🚀 TenantContext: Successfully restored tenant from storage:', storedTenant.name);
-            setCurrentTenant(storedTenant);
-            setCachedTenantId(storedTenantId);
-            setTenantInitialized(true);
-            
-            // Initialize tenant helpers
-            initializeTenantHelpers(storedTenantId);
-            
-            // Update Supabase context
-            await updateSupabaseContext(storedTenantId);
-            
-            return {
-              success: true,
-              tenantId: storedTenantId,
-              tenant: storedTenant,
-              fromStorage: true
-            };
-          } else {
-            console.warn('⚠️ TenantContext: Stored tenant ID invalid, will fetch fresh data');
-            // Clear invalid stored data
-            await AsyncStorage.removeItem('currentTenantId');
-          }
-        }
-      } catch (asyncStorageError) {
-        console.warn('⚠️ TenantContext: AsyncStorage error (continuing without cache):', asyncStorageError);
+      let targetTenantId = forcedTenantId;
+
+      // 1. Storage Path: If no forced ID, try to load from AsyncStorage (Cache Path)
+      if (!targetTenantId) {
+        try {
+          targetTenantId = await AsyncStorage.getItem('currentTenantId');
+        } catch (storageErr) {}
       }
-      
-      // Check if we have a current session before attempting email lookup
+
+      // 2. Fast Path: If we have an ID (forced or from storage), fetch details directly
+      if (targetTenantId) {
+        const { data: tenant, error: tenantError } = await supabase
+          .from('tenants')
+          .select('*')
+          .eq('id', targetTenantId)
+          .eq('status', 'active')
+          .maybeSingle();
+        
+        if (!tenantError && tenant) {
+          setCurrentTenant(tenant);
+          setCachedTenantId(targetTenantId);
+          setTenantInitialized(true);
+          initializeTenantHelpers(targetTenantId);
+          await updateSupabaseContext(targetTenantId);
+          
+          return {
+            success: true,
+            tenantId: targetTenantId,
+            tenant,
+            fromCache: !forcedTenantId
+          };
+        }
+      }
+
+      // 3. Network Path: Fallback to full email-based lookup (Network Path)
+      if (DEBUG_TENANT_LOGS) console.log('🌐 TenantContext: Falling back to email-based lookup...');
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
       if (sessionError || !session?.user) {
-        console.log('🚀 TenantContext: No active session, skipping tenant initialization');
         setLoading(false);
         return { success: false, isAuthError: true, error: 'No active session' };
       }
+
+      const result = await getCurrentUserTenantByEmail();
       
-      // Fetch tenant via email lookup (one-time initialization) with timeout
-      console.log('⏱️ TenantContext (init): Starting tenant lookup with 5 second timeout...');
-
-      const INIT_TENANT_TIMEOUT = 5000;
-      const initTimeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Tenant init timeout')), INIT_TENANT_TIMEOUT);
-      });
-
-      let result;
-      try {
-        result = await Promise.race([
-          getCurrentUserTenantByEmail(),
-          initTimeoutPromise
-        ]);
-      } catch (timeoutError) {
-        console.warn('⏰ TenantContext (init): Tenant lookup timed out, using fallback');
-        result = {
-          success: false,
-          error: 'Tenant initialization timed out - using fallback mode',
-          isTimeout: true
-        };
-      }
-
-      if (!result.success) {
-        // Handle authentication errors gracefully
-        const authErrorMessages = [
-          'No authenticated user found',
-          'No authenticated user',
-          'User not authenticated'
-        ];
+      if (result.success) {
+        const { tenant, tenantId } = result.data;
+        if (DEBUG_TENANT_LOGS) console.log('✅ TenantContext: Successfully initialized via email lookup');
         
-        const isAuthError = authErrorMessages.some(msg => 
-          result.error?.includes(msg) || result.error === msg
-        );
+        setCurrentTenant(tenant);
+        setCachedTenantId(tenantId);
+        setTenantInitialized(true);
+        initializeTenantHelpers(tenantId);
         
-        if (isAuthError) {
-          console.log('🚀 TenantContext: Auth error during initialization (normal during login):', result.error);
-          return { success: false, isAuthError: true, error: result.error };
-        } else {
-          console.error('❌ TenantContext: Failed to initialize tenant:', result.error);
-          setError(result.error);
-          return { success: false, error: result.error };
-        }
+        AsyncStorage.setItem('currentTenantId', tenantId).catch(() => {});
+        await updateSupabaseContext(tenantId);
+        
+        return { success: true, tenantId, tenant };
       }
-      
-      // Successfully got tenant data
-      const { tenant, tenantId } = result.data;
-      console.log('✅ TenantContext: Successfully initialized tenant:', {
-        id: tenant.id,
-        name: tenant.name,
-        status: tenant.status
-      });
-      
-      // Cache the data
-      setCurrentTenant(tenant);
-      setCachedTenantId(tenantId);
-      setTenantInitialized(true);
-      
-      // 🚀 ENHANCED: Initialize tenant helpers for global access
-      initializeTenantHelpers(tenantId);
-      
-      // Persist to storage (non-blocking on web)
-      if (typeof window === 'undefined') {
-        // On native, persist synchronously
-        await AsyncStorage.setItem('currentTenantId', tenantId);
-      } else {
-        // On web, persist asynchronously without blocking
-        AsyncStorage.setItem('currentTenantId', tenantId).catch(err => 
-          console.warn('⚠️ TenantContext: Failed to persist tenant ID:', err)
-        );
-      }
-      
-      // Update Supabase context
-      await updateSupabaseContext(tenantId);
-      
-      return {
-        success: true,
-        tenantId,
-        tenant,
-        initialized: true
-      };
+
+      return { success: false, error: result.error || 'Failed to resolve tenant' };
       
     } catch (error) {
-      console.error('❌ TenantContext: Error during tenant initialization:', error);
+      console.error('❌ TenantContext: Error during initialization:', error);
       setError(error.message);
       return { success: false, error: error.message };
     } finally {
+      initializationInProgress.current = false;
       setLoading(false);
     }
   };
@@ -336,20 +192,8 @@ export const TenantProvider = ({ children }) => {
       setLoading(true);
       setError(null);
       console.log('🔍 TenantContext: Starting email-based tenant loading...');
-      console.log('🔍 TenantContext: Timestamp:', new Date().toISOString());
-      console.log('🔍 TenantContext: Current state before loading:', {
-        currentTenant: currentTenant ? 'SET' : 'NULL',
-        loading,
-        error: error || 'none'
-      });
       
-      // Use the email-based lookup function with timeout
-      console.log('🔍 TenantContext: Calling getCurrentUserTenantByEmail()...');
-
-      // Add timeout to prevent hanging
-      const TENANT_LOOKUP_TIMEOUT = 5000; // 5 seconds timeout
-      console.log('⏱️ TenantContext: Starting tenant lookup with 5 second timeout...');
-
+      const TENANT_LOOKUP_TIMEOUT = 60000;
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => reject(new Error('Tenant lookup timeout')), TENANT_LOOKUP_TIMEOUT);
       });
@@ -369,17 +213,8 @@ export const TenantProvider = ({ children }) => {
         };
       }
 
-      console.log('🔍 TenantContext: getCurrentUserTenantByEmail result:', {
-        success: result.success,
-        hasData: !!result.data,
-        error: result.error || 'none',
-        isAuthError: result.isAuthError || false,
-        isTimeout: result.isTimeout || false,
-        code: result.code || 'none'
-      });
-      
       if (!result.success) {
-        // Check if this is just "no authenticated user" or other expected authentication errors
+        // Handle authentication errors gracefully
         const authErrorMessages = [
           'No authenticated user found',
           'No authenticated user',
@@ -393,69 +228,41 @@ export const TenantProvider = ({ children }) => {
         );
         
         if (isAuthError) {
-          console.log('🔍 TenantContext: Authentication error detected - this is normal for login screen:', result.error);
-          // Don't set this as an error - it's expected behavior during authentication flow
+          console.log('🔍 TenantContext: Authentication error detected:', result.error);
           setCurrentTenant(null);
-          setError(null); // Clear any previous errors
+          setError(null);
         } else {
           console.error('❌ TenantContext: Email-based tenant lookup failed:', result.error);
-          // Only set error for non-authentication issues
           setError(result.error);
           setCurrentTenant(null);
         }
-        } else {
-          console.log('✅ TenantContext: Successfully loaded tenant via email:', {
-            id: result.data.tenant.id,
-            name: result.data.tenant.name,
-            email: result.data.userRecord.email,
-            status: result.data.tenant.status
-          });
-          
-          // Set the tenant in context
-          setCurrentTenant(result.data.tenant);
-          
-          // 🚀 ENHANCED: Mark tenant as initialized and cache the ID
-          setCachedTenantId(result.data.tenant.id);
-          setTenantInitialized(true);
-          
-          // 🚀 ENHANCED: Initialize tenant helpers for global access
-          try {
-            initializeTenantHelpers(result.data.tenant.id);
-            console.log('🚀 TenantContext: Tenant helpers initialized successfully');
-          } catch (helperError) {
-            console.warn('⚠️ TenantContext: Error initializing tenant helpers:', helperError);
-          }
-          
-          // Cache the tenant ID in storage
-          await AsyncStorage.setItem('currentTenantId', result.data.tenant.id);
-          
-          console.log('🎉 TenantContext: Email-based tenant loading completed successfully!');
+      } else {
+        const { tenant, tenantId, userRecord } = result.data;
+        console.log('✅ TenantContext: Successfully loaded tenant via email:', tenant.name);
+        
+        setCurrentTenant(tenant);
+        setCachedTenantId(tenantId);
+        setTenantInitialized(true);
+        
+        try {
+          initializeTenantHelpers(tenantId);
+        } catch (helperError) {
+          console.warn('⚠️ TenantContext: Error initializing tenant helpers:', helperError);
         }
+        
+        await AsyncStorage.setItem('currentTenantId', tenantId);
+        await updateSupabaseContext(tenantId);
+        console.log('🎉 TenantContext: Email-based tenant loading completed!');
+      }
       
     } catch (error) {
       console.error('❌ TenantContext: Email-based tenant loading failed:', error);
-      
-      // List of authentication-related error messages that should be suppressed on login screen
-      const authErrorMessages = [
-        'authenticated user',
-        'No authenticated user found',
-        'User not authenticated', 
-        'Authentication required',
-        'Session expired',
-        'Invalid JWT',
-        'JWT expired'
-      ];
-      
-      // Check if this is an authentication error
-      const isAuthError = authErrorMessages.some(msg => 
-        error.message?.includes(msg)
-      );
+      const isAuthError = error.message?.includes('authenticated user') || 
+                         error.message?.includes('session');
       
       if (isAuthError) {
-        console.log('🔍 TenantContext: Authentication error suppressed (normal for login flow):', error.message);
-        setError(null); // Don't show authentication errors to users
+        setError(null);
       } else {
-        // Only set error for non-authentication issues
         setError(error.message);
       }
       setCurrentTenant(null);
@@ -693,7 +500,7 @@ export const TenantProvider = ({ children }) => {
   // Update Supabase context with tenant ID
   const updateSupabaseContext = async (tenantId) => {
     try {
-      console.log('🏢 Setting tenant context for:', tenantId);
+      if (DEBUG_TENANT_LOGS) console.log('🏢 Setting tenant context for:', tenantId);
       
       // Get current session to check if user is authenticated
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -706,7 +513,7 @@ export const TenantProvider = ({ children }) => {
             setting_name: 'app.current_tenant_id',
             setting_value: tenantId
           });
-          console.log('✅ Successfully set tenant context via RPC');
+          if (DEBUG_TENANT_LOGS) console.log('✅ Successfully set tenant context via RPC');
         } catch (rpcError) {
           // If the RPC doesn't exist or fails, that's okay - we'll use client-side context
           console.warn('⚠️ set_config RPC not available or failed:', rpcError.message);

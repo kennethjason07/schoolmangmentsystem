@@ -160,7 +160,8 @@ export const getTenantIdByEmail = async (email) => {
     console.error('📧 EMAIL LOOKUP: Unexpected error:', error);
     return {
       success: false,
-      error: `Unexpected error: ${error.message}`
+      error: error?.message || 'An unexpected error occurred during email lookup',
+      code: 'UNEXPECTED_ERROR'
     };
   }
 };
@@ -232,7 +233,8 @@ export const getCurrentUserTenantByEmail = async () => {
     console.error('📧 CURRENT USER: Unexpected error:', error);
     return {
       success: false,
-      error: `Unexpected error: ${error.message}`
+      error: error?.message || 'An unexpected error occurred while getting current user tenant',
+      code: 'UNEXPECTED_ERROR'
     };
   }
 };

@@ -271,14 +271,23 @@ const styles = StyleSheet.create({
   banner: {
     borderRadius: 12,
     marginHorizontal: 10,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: {
+          width: 0,
+          height: 2,
+        },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+      },
+      android: {
+        elevation: 5,
+      },
+      web: {
+        boxShadow: '0 2px 3.84px rgba(0,0,0,0.25)',
+      }
+    }),
     overflow: 'hidden',
   },
   content: {

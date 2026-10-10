@@ -14,7 +14,7 @@ export class AuthFix {
   /**
    * Helper function to add timeout to promises
    */
-  static async withTimeout(promise, timeoutMs = 5000) {
+  static async withTimeout(promise, timeoutMs = 60000) {
     return Promise.race([
       promise,
       new Promise((_, reject) => 
@@ -38,7 +38,9 @@ export class AuthFix {
         'session',
         'user',
         'access_token',
-        'refresh_token'
+        'refresh_token',
+        'cached_auth_user',
+        'cached_auth_user_type'
       ];
       
       // Clear each key
@@ -124,7 +126,7 @@ export class AuthFix {
       // Clear all storage regardless of signOut result
       await this.clearAllAuthData();
       
-      console.log('✅ Force sign out complete');
+      if (DEBUG_AUTH_FIX_LOGS) console.log('✅ Force sign out complete');
       return true;
     } catch (error) {
       console.error('❌ Force sign out error:', error);
@@ -136,7 +138,8 @@ export class AuthFix {
    * Check if current session is valid and handle invalid refresh tokens (web-safe with timeout)
    */
   static async validateAndFixSession() {
-    const VALIDATION_TIMEOUT = Platform.OS === 'web' ? 4000 : 8000; // Much shorter timeout for web
+    // INCREASED TIMEOUT: Be extremely generous to prevent accidental logouts on very slow networks
+    const VALIDATION_TIMEOUT = Platform.OS === 'web' ? 60000 : 70000; 
     
     try {
       if (DEBUG_AUTH_FIX_LOGS) console.log('🔍 Validating current session...');
@@ -148,19 +151,13 @@ export class AuthFix {
     } catch (error) {
       console.error('❌ Session validation failed or timed out:', error.message);
       
-      // If validation times out or fails, assume we need to reauth
+      // If validation times out, DON'T force sign out immediately
+      // This prevents logging users out just because their connection is slow
       if (error.message.includes('timed out')) {
-        console.log('⏱️ Session validation timed out - forcing sign out to prevent infinite loading');
-        
-        // Don't wait for force sign out to complete if it might also hang
-        try {
-          await this.withTimeout(this.forceSignOut(), 3000);
-        } catch (signOutError) {
-          console.warn('⚠️ Force sign out also timed out, continuing anyway:', signOutError.message);
-        }
+      if (DEBUG_AUTH_FIX_LOGS) console.log('⏱️ Session validation timed out - will retry or continue in limited mode');
       }
       
-      return { valid: false, needsReauth: true, error };
+      return { valid: false, needsReauth: false, error };
     }
   }
   
@@ -187,16 +184,18 @@ export class AuthFix {
       }
       
       if (!sessionData.session) {
-        console.log('ℹ️ No active session');
+        // Logs removed for cleanup
         return { valid: false, needsReauth: true };
       }
       
-      console.log('✅ Session is valid');
-      console.log('User:', sessionData.session.user.email);
+      if (DEBUG_AUTH_FIX_LOGS) {
+        console.log('✅ Session is valid');
+        console.log('User:', sessionData.session.user.email);
+      }
       
       // Step 2: On web, skip refresh to avoid hanging - just return valid session
       if (Platform.OS === 'web') {
-        console.log('🌐 Web platform - skipping session refresh to prevent hanging');
+        if (DEBUG_AUTH_FIX_LOGS) console.log('🌐 Web platform - skipping session refresh to prevent hanging');
         return { valid: true, session: sessionData.session };
       }
       

@@ -992,8 +992,13 @@ const PhotoUpload = ({ navigation }) => {
         {/* Scroll to Top Button (Web only) */}
         {Platform.OS === 'web' && (
           <Animated.View 
-            style={[styles.scrollToTopButton, { opacity: scrollTopOpacity }]}
-            pointerEvents={showScrollTop ? 'auto' : 'none'}
+            style={[
+              styles.scrollToTopButton, 
+              { 
+                opacity: scrollTopOpacity,
+                pointerEvents: showScrollTop ? 'auto' : 'none' 
+              }
+            ]}
           >
             <TouchableOpacity style={styles.scrollToTopInner} onPress={scrollToTop}>
               <Ionicons name="chevron-up" size={24} color="#fff" />

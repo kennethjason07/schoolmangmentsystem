@@ -26,8 +26,8 @@ import * as Animatable from 'react-native-animatable';
 import { useTenantAccess, initializeTenantHelpers } from '../../utils/tenantHelpers';
 import { getTenantIdByEmail } from '../../utils/getTenantByEmail';
 
-// Import VidyaSetu logo with fallback
-const VidyaSetuLogo = require('../../../assets/logo-white.png');
+// Import CampusSentinel logo with fallback
+const CampusSentinelLogo = require('../../../assets/logo-white.png');
 
 // Import role-specific logos
 const TeacherLogo = require('../../../logo-teacher.jpg');
@@ -93,7 +93,7 @@ const LoginScreen = ({ navigation }) => {
       console.log('🚀 ENHANCED_TENANT_SYSTEM: Validating tenant access for:', userEmail);
 
       // Add timeout to prevent hanging
-      const TENANT_VALIDATION_TIMEOUT = 5000; // 5 seconds timeout
+      const TENANT_VALIDATION_TIMEOUT = 45000; // Increased to 45 seconds timeout
       console.log('⏱️ Starting tenant validation with 5 second timeout...');
 
       // Create a promise that rejects after timeout
@@ -143,7 +143,7 @@ const LoginScreen = ({ navigation }) => {
       console.log('🔍 Validating role:', role);
 
       // Add timeout to prevent hanging
-      const ROLE_VALIDATION_TIMEOUT = 5000; // 5 seconds timeout
+      const ROLE_VALIDATION_TIMEOUT = 45000; // Increased to 45 seconds timeout
 
       console.log('⏱️ Starting role validation with 5 second timeout...');
 
@@ -310,12 +310,10 @@ const LoginScreen = ({ navigation }) => {
           
           if (errorMsg.includes('invalid') && (errorMsg.includes('credentials') || errorMsg.includes('login'))) {
             errorMessage = 'Invalid email or password. Please check your credentials and try again.';
-            includePasswordMask = true;
           } else if (errorMsg.includes('user not found') || errorMsg.includes('email not confirmed')) {
             errorMessage = 'User not found. Please check your email address or contact your administrator.';
           } else if (errorMsg.includes('password') && errorMsg.includes('incorrect')) {
             errorMessage = 'Incorrect password. Please try again.';
-            includePasswordMask = true;
           } else if (errorMsg.includes('email') && errorMsg.includes('invalid')) {
             errorMessage = 'Invalid email format. Please enter a valid email address.';
           } else if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
@@ -326,12 +324,6 @@ const LoginScreen = ({ navigation }) => {
             // Use the original error message if it's user-friendly
             errorMessage = error.message.length > 100 ? 'Login failed. Please try again.' : error.message;
           }
-        }
-        
-        // Add masked password confirmation for password-related errors
-        if (includePasswordMask && password) {
-          const maskedPassword = createMaskedPassword(password);
-          errorMessage += `\n\nPassword entered: ${maskedPassword}\n(This helps confirm you typed what you intended)`;
         }
         
         console.log('🚨 Formatted error message:', errorMessage);
@@ -375,13 +367,6 @@ const LoginScreen = ({ navigation }) => {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  // Function to create masked password for secure display
-  const createMaskedPassword = (password) => {
-    if (!password) return '';
-    // Create mask with same length as password for user confirmation
-    return '*'.repeat(password.length);
   };
 
   // Function to close the error popup
@@ -475,7 +460,7 @@ const LoginScreen = ({ navigation }) => {
   return (
     <View style={styles.mainContainer}>
       {/* Error Popup Modal */}
-      {console.log('📱 Modal render - showErrorPopup:', showErrorPopup, 'loginError:', loginError)}
+      {/* Debug log removed for cleanup */}
       <Modal
         animationType="fade"
         transparent={true}
@@ -543,10 +528,10 @@ const LoginScreen = ({ navigation }) => {
             animation="fadeInDown"
             duration={1000}
           >
-            {/* VidyaSetu Logo - Replace with your custom logo */}
+            {/* CampusSentinel Logo - Replace with your custom logo */}
             {!logoError ? (
               <Image
-                source={VidyaSetuLogo}
+                source={CampusSentinelLogo}
                 style={styles.logoImage}
                 resizeMode="contain"
                 onError={(error) => {
@@ -554,7 +539,7 @@ const LoginScreen = ({ navigation }) => {
                   setLogoError(true);
                 }}
                 onLoad={() => {
-                  console.log('Logo loaded successfully');
+                  // Logs removed for cleanup
                 }}
               />
             ) : (
@@ -563,7 +548,7 @@ const LoginScreen = ({ navigation }) => {
                 {/* Beautiful text-based logo design */}
                 <View style={styles.textLogoContainer}>
                   <View style={styles.textLogoCircle}>
-                    <Text style={styles.textLogoMain}>VS</Text>
+                    <Text style={styles.textLogoMain}>CS</Text>
                   </View>
                   <View style={styles.bridgeSymbol}>
                     <View style={styles.bridgeLine} />
@@ -573,7 +558,7 @@ const LoginScreen = ({ navigation }) => {
                 </View>
               </View>
             )}
-            <Text style={styles.appTitle}>VidyaSetu</Text>
+            <Text style={styles.appTitle}>CampusSentinel</Text>
             <Text style={styles.appSubtitle}>Bridge of Knowledge</Text>
           </Animatable.View>
 
@@ -654,10 +639,10 @@ const LoginScreen = ({ navigation }) => {
             </View>
 
             {/* Email Input */}
+            {/* Email Input */}
             <View style={styles.inputSection}>
               <Text style={styles.inputLabel}>Email Address</Text>
               <View style={styles.inputContainer}>
-                <Ionicons name="mail" size={24} color="#1976d2" />
                 <TextInput
                   style={styles.input}
                   placeholder="Enter your email address"
@@ -670,20 +655,9 @@ const LoginScreen = ({ navigation }) => {
                   keyboardType="email-address"
                   autoCapitalize="none"
                   autoCorrect={false}
-                  // Web-specific enhancement
-                  {...(Platform.OS === 'web' && {
-                    onFocus: (e) => {
-                      e.currentTarget.style.borderColor = '#1976d2';
-                      e.currentTarget.style.boxShadow = '0 0 0 2px rgba(25, 118, 210, 0.25)';
-                    },
-                    onBlur: (e) => {
-                      e.currentTarget.style.borderColor = '#ddd';
-                      e.currentTarget.style.boxShadow = 'none';
-                    }
-                  })}
                 />
               </View>
-              {emailError && (
+              {!!emailError && (
                 <Text style={styles.errorText}>{emailError}</Text>
               )}
             </View>
@@ -703,22 +677,10 @@ const LoginScreen = ({ navigation }) => {
                     validatePassword(text);
                   }}
                   secureTextEntry={!showPassword}
-                  // Web-specific enhancement
-                  {...(Platform.OS === 'web' && {
-                    onFocus: (e) => {
-                      e.currentTarget.style.borderColor = '#1976d2';
-                      e.currentTarget.style.boxShadow = '0 0 0 2px rgba(25, 118, 210, 0.25)';
-                    },
-                    onBlur: (e) => {
-                      e.currentTarget.style.borderColor = '#ddd';
-                      e.currentTarget.style.boxShadow = 'none';
-                    }
-                  })}
                 />
                 <TouchableOpacity
                   style={styles.showPasswordButton}
                   onPress={() => setShowPassword(!showPassword)}
-                  // Web-specific enhancement for hover effect
                   {...(Platform.OS === 'web' && {
                     onMouseEnter: (e) => {
                       e.currentTarget.style.opacity = 0.7;
@@ -735,7 +697,7 @@ const LoginScreen = ({ navigation }) => {
                   />
                 </TouchableOpacity>
               </View>
-              {passwordError && (
+              {!!passwordError && (
                 <Text style={styles.errorText}>{passwordError}</Text>
               )}
             </View>
@@ -1064,7 +1026,7 @@ const styles = StyleSheet.create({
     color: '#333',
     // Web-specific enhancements
     ...(Platform.OS === 'web' && {
-      outline: 'none',
+      outlineStyle: 'none',
     }),
   },
   showPasswordButton: {
@@ -1154,7 +1116,6 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' ? {
       boxShadow: '0 15px 35px rgba(0, 0, 0, 0.3)',
       cursor: 'default',
-      animation: 'modalFadeIn 0.3s ease-out',
     } : {
       shadowColor: '#000',
       shadowOffset: {

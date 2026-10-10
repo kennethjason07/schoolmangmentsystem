@@ -654,7 +654,7 @@ const PushNotificationManager = ({ visible, onClose }) => {
                 <View style={styles.notificationPreview}>
                   <View style={styles.previewHeader}>
                     <Ionicons name="school" size={24} color="#2196F3" />
-                    <Text style={styles.appName}>VidyaSetu</Text>
+                    <Text style={styles.appName}>CampusSentinel</Text>
                     <Text style={styles.previewTime}>now</Text>
                   </View>
                   <Text style={styles.previewTitle}>{title || 'Notification Title'}</Text>

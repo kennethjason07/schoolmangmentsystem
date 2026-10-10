@@ -13,6 +13,12 @@
       },
       "distribution": "internal"
     },
+    "open-testing": {
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "distribution": "store"
+    },
     "production": {
       "android": {
         "buildType": "app-bundle"
@@ -21,6 +27,12 @@
     }
   },
   "submit": {
+    "open-testing": {
+      "android": {
+        "serviceAccountKeyPath": "./google-service-account.json",
+        "track": "beta"
+      }
+    },
     "production": {
       "android": {
         "serviceAccountKeyPath": "./google-service-account.json",

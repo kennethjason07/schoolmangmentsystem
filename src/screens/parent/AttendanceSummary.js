@@ -2551,9 +2551,21 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '900',
     fontSize: 18,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+    ...Platform.select({
+      ios: {
+        textShadowColor: 'rgba(0, 0, 0, 0.5)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 2,
+      },
+      android: {
+        textShadowColor: 'rgba(0, 0, 0, 0.5)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 2,
+      },
+      web: {
+        textShadow: '1px 1px 2px rgba(0,0,0,0.5)',
+      }
+    }),
   },
   otherMonthText: {
     color: '#adb5bd',
@@ -2896,9 +2908,21 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '900',
     fontSize: 18,
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+    ...Platform.select({
+      ios: {
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 2,
+      },
+      android: {
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 2,
+      },
+      web: {
+        textShadow: '1px 1px 2px rgba(0,0,0,0.3)',
+      }
+    }),
   },
   modernDayText_present: {
     color: '#2e7d32',
